@@ -16,6 +16,20 @@ const TEMPLATES = [
 // range (e.g. "1-500" meant to be "1-5") silently builds hundreds of records and can freeze the tab.
 const MAX_CERTIFICATES = 200;
 
+// Earliest launch year among the journals. A DOI's volume can't exceed the years since then, which
+// is what tells "15 8 17" apart from a misread volume such as "91" in "91217".
+const FIRST_JOURNAL_YEAR = 2011;
+
+// The certificate text sits in a fixed-size text box, so text that doesn't fit is cut off rather
+// than moved to a new page. Each entry is a measured [title chars, designation chars] pair where
+// every line still survives Word's PDF export. A record is safe if it fits inside ANY pair.
+const SAFE_TEXT_SIZES = {
+    CCE: [[140, 220], [220, 100]],
+    SET: [[220, 220]],
+    ICE: [[180, 180], [220, 100]],
+    RJR: [[180, 220], [220, 100]]
+};
+
 const state = {
     docxLoaded: false,       // Whether a DOCX template has been loaded
     docxBuffer: null,        // Raw ArrayBuffer of the selected DOCX template
@@ -26,6 +40,8 @@ const state = {
     authorListLine: '',      // Original (superscript-preserved) author-list text, used in output filenames
     loadToken: 0,             // Bumped on every template pick; guards against a stale fetch() resolving late
     librariesMissing: false, // True if PizZip/docxtemplater failed to load from the CDN
+    publicationBlocked: false, // True while volume/issue/year/month are missing or unreadable
+    downloading: false,      // True while a download runs; edits must not re-enable the buttons
     _lastParseError: null,
     _lastWarningsKey: ''
 };
@@ -86,7 +102,7 @@ function init() {
     // "PizZip is not a constructor" error. Detect it up front instead.
     if (typeof window.PizZip !== 'function' || typeof window.docxtemplater !== 'function') {
         state.librariesMissing = true;
-        toggleButtons(false);
+        refreshDownloadButtons();
         log('DOCX libraries (PizZip/docxtemplater) failed to load from the CDN -- downloads are disabled. Check your network connection and reload the page.', 'error');
     }
 
@@ -189,6 +205,12 @@ async function selectTemplate(key) {
         return;
     }
 
+    // The highlighted card has already changed, so the previous template must stop being usable.
+    state.docxLoaded = false;
+    state.docxBuffer = null;
+    state.templateKey = key;
+    handleDataInput();
+
     el.templateStatus.textContent = `Loading ${key} template...`;
     log(`Loading the ${key} certificate template...`, 'system');
 
@@ -210,18 +232,21 @@ async function selectTemplate(key) {
     } catch (err) {
         if (myToken !== state.loadToken) return; // superseded by a newer selection
 
-        // Leave docxLoaded false so the export button stays disabled.
+        // Leave docxLoaded false so the export buttons stay disabled.
         state.docxLoaded = false;
+        state.templateKey = '';
         markActiveCard('');
         el.templateStatus.textContent = 'No template selected';
         log(`Could not load the ${key} template: ${err.message}`, 'error');
-        toggleButtons(false);
+        handleDataInput();
     }
 }
 
-// Helper to disable/enable export buttons
-function toggleButtons(enabled) {
-    const canEnable = enabled && !state.librariesMissing;
+// Downloads are only available when everything a certificate prints is known and no export is
+// already running. Every state change goes through this one check.
+function refreshDownloadButtons() {
+    const canEnable = state.docxLoaded && state.records.length > 0 && !state.publicationBlocked
+        && !state.librariesMissing && !state.downloading;
     el.btnDownloadAll.disabled = !canEnable;
     el.btnDownloadMulti.disabled = !canEnable;
     el.btnDownloadGroup.disabled = !canEnable;
@@ -233,8 +258,9 @@ function handleDataInput() {
     if (!text) {
         state.records = [];
         state.authorListLine = '';
+        state.publicationBlocked = false;
         el.parserStatus.textContent = 'No data input';
-        toggleButtons(false);
+        refreshDownloadButtons();
         renderPreview([], []);
         renderLivePreview({ records: [] });
         return;
@@ -244,14 +270,22 @@ function handleDataInput() {
         const result = parseDataInput(text);
         state.records = result.records;
         state.authorListLine = result.authorListLine;
-        el.parserStatus.textContent = `${state.records.length} record(s) parsed`
-            + (state.docxLoaded ? '' : ' — pick a template to enable downloads');
-        toggleButtons(state.docxLoaded && state.records.length > 0);
+        state.publicationBlocked = !!result.publicationIssue;
+        let status = `${state.records.length} record(s) parsed`;
+        if (!state.docxLoaded) status += ' — pick a template to enable downloads';
+        else if (state.publicationBlocked) status += ' — complete section 3 to enable downloads';
+        el.parserStatus.textContent = status;
+        refreshDownloadButtons();
         state._lastParseError = null;
-        renderPreview(result.records, result.warnings);
+        const shown = result.publicationIssue
+            ? [...result.warnings, result.publicationIssue]
+            : result.warnings;
+        renderPreview(result.records, shown);
         renderLivePreview({ records: result.records });
 
-        // Log each distinct set of warnings once, rather than re-logging on every keystroke.
+        // Log each distinct set of warnings once, rather than re-logging on every keystroke. The
+        // publication issue stays out of the log: it changes on every character typed into the
+        // DOI box and is already on screen in the Parsed Preview.
         const warningsKey = result.warnings.join('\n');
         if (warningsKey && warningsKey !== state._lastWarningsKey) {
             result.warnings.forEach(w => log(w, 'error'));
@@ -259,8 +293,9 @@ function handleDataInput() {
         state._lastWarningsKey = warningsKey;
     } catch (err) {
         state.records = [];
+        state.publicationBlocked = false;
         el.parserStatus.textContent = `Parse error: ${err.message}`;
-        toggleButtons(false);
+        refreshDownloadButtons();
         renderPreview([], []);
         renderLivePreview({ records: [], error: err.message });
         // Surface it in the visible log too (once per distinct message) so a failed parse
@@ -272,24 +307,41 @@ function handleDataInput() {
     }
 }
 
+// Find the mapping suffix at the end of a value, or return null if the trailing number is really
+// part of the text. A suffix is attached to the value ("India1", "Rao2-3"). These are NOT suffixes:
+// PIN codes and years ("Chennai - 600001", "Machine Learning 2025"), a number after a hyphen or
+// dot ("COVID-19", "Industry 4.0", "Coimbatore-14"), and a separated number ("Phase 2", "Sector 5").
+// `allowSpaced` covers the one exception, an author list written as "Ravi Kumar 1, Anita Rao 2".
+function trailingSuffix(piece, allowSpaced) {
+    const match = piece.match(/\d+(?:-\d+)?$/);
+    if (!match || match.index === 0) return null;
+    const before = piece[match.index - 1];
+    if (/[-–—./\d]/.test(before)) return null;
+    if (/\s/.test(before) && !allowSpaced) return null;
+    if (parseInt(match[0], 10) > MAX_CERTIFICATES) return null;
+    return match;
+}
+
 function parseMappingLine(line) {
     // Split on commas, then reassemble: a piece with no trailing digit suffix continues
     // the current value (values may legitimately contain commas, e.g. "Dept, City, Country1-2").
-    // A piece that is PURELY numeric/range (e.g. "2", "3-4") is an additional suffix for the
-    // most recent item, supporting discontinuous suffix lists like "India1,2,3".
-    const pieces = line.split(',').map(p => p.trim());
+    // A piece that is PURELY numeric/range (e.g. "2", "3-4") directly after a suffixed item is an
+    // additional suffix for it, supporting discontinuous suffix lists like "India1,2,3".
+    const pieces = line.split(',').map(p => p.trim()).filter(Boolean);
+    const isBareNumber = p => /^\d+(?:-\d+)?$/.test(p);
+    const textPieces = pieces.filter(p => !isBareNumber(p));
+    const allowSpaced = textPieces.length >= 2 && textPieces.every(p => /\s\d+(?:-\d+)?$/.test(p));
     const items = [];
     let bufferVal = null;
 
     pieces.forEach(piece => {
-        if (!piece) return;
-
-        if (/^\d+(?:-\d+)?$/.test(piece) && items.length > 0) {
+        if (isBareNumber(piece) && items.length > 0 && !bufferVal
+            && parseInt(piece, 10) <= MAX_CERTIFICATES) {
             items[items.length - 1].suffix += ',' + piece;
             return;
         }
 
-        const match = piece.match(/\d+(?:-\d+)?$/);
+        const match = trailingSuffix(piece, allowSpaced);
         if (match) {
             const val = piece.substring(0, match.index).trim();
             const suffix = match[0];
@@ -322,18 +374,36 @@ const SUPERSCRIPT_MAP = {
 };
 const SUPERSCRIPT_CHARS = /[⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺]/;
 function normalizeSuperscripts(text) {
-    return text.replace(new RegExp(SUPERSCRIPT_CHARS, 'g'), ch => SUPERSCRIPT_MAP[ch]);
+    return text
+        .replace(new RegExp(`\\s+(?=${SUPERSCRIPT_CHARS.source})`, 'g'), '')
+        .replace(new RegExp(SUPERSCRIPT_CHARS, 'g'), ch => SUPERSCRIPT_MAP[ch]);
+}
+
+// Author lists aren't always comma-separated: "Ravi Kumar1 and Anita Rao2", "A1; B2", "A1 & B2",
+// and a corresponding-author mark, "A1*, B2". Reduce them to the comma form the parser reads. Only
+// a line that ends in a suffix is touched, so a title such as "Web3 and AI" is left alone.
+function normalizeSeparators(line) {
+    if (!/[^\s\d]\d+(?:-\d+)?[*†‡]*$/.test(line)) return line;
+    return line
+        .replace(/(\d)[*†‡]+/g, '$1')
+        .replace(/[*†‡]+(\d)/g, '$1')
+        .replace(/([^\s\d]\d+(?:-\d+)?)\s*(?:;|&|\band\b)\s*/gi, '$1, ');
 }
 
 // Affiliation/designation keywords, and the generic words that mark a short suffixed value as a
 // paper title rather than a name (e.g. the app's own "Sample Paper Title1-2" placeholder). Both
 // are matched as WHOLE WORDS, not substrings -- a substring match would flag ordinary prose like
 // "Indian Universities" (contains "india"/"university" as substrings) as an affiliation line.
-const NAME_KEYWORDS = ['student', 'professor', 'lecturer', 'department', 'college', 'university', 'researcher', 'studies', 'faculty', 'india', 'scholar'];
+const NAME_KEYWORDS = ['student', 'professor', 'lecturer', 'department', 'college', 'university', 'researcher', 'studies', 'faculty', 'india', 'scholar',
+    'institute', 'school', 'assistant', 'associate', 'engineer', 'dean', 'principal', 'head', 'hod', 'director', 'manager'];
 const NAME_KEYWORD_RE = new RegExp(`\\b(?:${NAME_KEYWORDS.join('|')})\\b`, 'i');
 const NAME_KEYWORD_RE_G = new RegExp(`\\b(?:${NAME_KEYWORDS.join('|')})\\b`, 'gi');
 const TITLE_HINT_WORDS = ['title', 'paper', 'study', 'analysis', 'survey', 'review', 'research', 'abstract', 'thesis'];
 const TITLE_HINT_RE = new RegExp(`\\b(?:${TITLE_HINT_WORDS.join('|')})\\b`, 'i');
+// Words that can't be part of a person's name, even though some keywords above can ("Asha Head").
+const INSTITUTION_RE = /\b(?:university|college|institute|school|department|faculty)\b/i;
+// Connecting words that appear in titles but not in names.
+const NOT_A_NAME_RE = /\b(?:a|an|the|of|for|in|on|and|with|using|by|to|from|via)\b/i;
 
 function parseDataInput(text) {
     // Keep original (pre-normalization) lines alongside normalized ones so the original
@@ -345,16 +415,23 @@ function parseDataInput(text) {
     // with a comma is a continuation, so stitch it onto the next line before classifying --
     // otherwise the tail ("Tamil Nadu, India1") is parsed as its own line while the head
     // ("Professor and Head, Department of Commerce,") loses its mapping suffix and is dropped.
+    // A complete line with a stray trailing comma ("Ravi Kumar1, Anita Rao2,") is the exception:
+    // it only continues if the next line carries on the same list of names.
+    const continuesNameList = line => {
+        const items = parseMappingLine(normalizeSuperscripts(line));
+        return items.length > 0 && items.every(it => it.val.length < 40 && !NAME_KEYWORD_RE.test(it.val));
+    };
     const origLines = [];
     rawLines.forEach(line => {
         const prev = origLines[origLines.length - 1];
-        if (prev && /,$/.test(prev)) {
+        const endsInSuffix = prev && /\d\s*,$/.test(normalizeSuperscripts(prev));
+        if (prev && /,$/.test(prev) && (!endsInSuffix || continuesNameList(line))) {
             origLines[origLines.length - 1] = prev + ' ' + line;
         } else {
             origLines.push(line);
         }
     });
-    const normLines = origLines.map(normalizeSuperscripts);
+    const normLines = origLines.map(line => normalizeSeparators(normalizeSuperscripts(line)));
 
     // Classify lines dynamically
     const classification = {
@@ -369,13 +446,16 @@ function parseDataInput(text) {
         classification.NAME_ORIGINAL.push(orig);
     };
 
-    // A single short (<=3 word) suffixed value with no commas is inherently ambiguous: it could
-    // be a lone recipient's name ("Ravi Kumar1") or a short paper title mapped to several
-    // certificates via a range ("Deep Learning Advances1-3"). Rather than guess per-line, every
-    // such value is queued here and resolved in one pass after all lines are classified (below),
-    // based on whether a STRONGER, unambiguous name signal (an honorific, a comma-separated list
-    // of short values, or a superscript-tagged author) turned up anywhere else in the input.
+    // A single short suffixed value with no commas is inherently ambiguous: it could be a lone
+    // recipient's name ("Ravi Kumar1") or a short paper title mapped to several certificates via a
+    // range ("Deep Learning Advances1-3"). Rather than guess per-line, every such value is queued
+    // here and resolved in one pass after all lines are classified (below), based on whether a
+    // STRONGER, unambiguous name signal (an honorific, a comma-separated list of short values, or
+    // a superscript-tagged author) turned up anywhere else in the input.
     const ambiguousShortValues = [];
+
+    // What the previous line was, so a wrapped title or affiliation can be rejoined.
+    let previous = { field: '', hasSuffix: false };
 
     normLines.forEach((line, i) => {
         const trimmed = line.trim();
@@ -385,6 +465,7 @@ function parseDataInput(text) {
         const hasSuffix = parsed.length > 0 && parsed.some(item => /\d/.test(item.suffix));
         const allShort = parsed.length > 0 && parsed.every(item => item.val.length < 40);
         const noInnerCommas = parsed.every(item => !item.val.includes(','));
+        const noInstitutions = parsed.every(item => !INSTITUTION_RE.test(item.val));
         const hadSuperscript = SUPERSCRIPT_CHARS.test(origLines[i] || '');
         const singleValWords = parsed.length === 1 ? parsed[0].val.split(/\s+/).filter(Boolean).length : 0;
 
@@ -398,16 +479,40 @@ function parseDataInput(text) {
         const commaCount = (trimmed.match(/,/g) || []).length;
         const totalWords = trimmed.split(/\s+/).filter(Boolean).length;
 
-        // 1. An honorific ("Mr.", "Dr ", "Prof.") at the START of a comma-separated author
-        //    segment that also carries a mapping suffix ("Dr. Arunpriya S1") is an unambiguous
-        //    name marker. Requiring it at the segment start -- not anywhere in the line -- keeps
-        //    an institution whose name contains an honorific ("Dr. N.G.P. Arts and Science
-        //    College") from turning its whole affiliation line into a spurious name. The dot or
-        //    space after the honorific keeps ordinary names ("Mrinal1", "Drithi1") from matching.
-        const honorificName = parsed.some(item =>
-            /^\(?(Mr|Mrs|Ms|Dr|Prof)(\.|\s)/i.test(item.val.trim()) && /\d/.test(item.suffix));
-        if (honorificName) {
+        const openTitle = previous.field === 'PaperTitle' && !previous.hasSuffix;
+        const openDesignation = previous.field === 'Designation' && !previous.hasSuffix;
+
+        const asName = () => {
             addName(trimmed, origLines[i]);
+            previous = { field: 'NAME', hasSuffix };
+        };
+        const asDesignation = () => {
+            classification.Designation.push(trimmed);
+            previous = { field: 'Designation', hasSuffix };
+        };
+        // A line directly after an unsuffixed title line is the rest of that title.
+        const asTitle = () => {
+            const titles = classification.PaperTitle;
+            if (openTitle) titles[titles.length - 1] += ' ' + trimmed;
+            else titles.push(trimmed);
+            previous = { field: 'PaperTitle', hasSuffix };
+        };
+        const extendDesignation = () => {
+            const list = classification.Designation;
+            list[list.length - 1] += ', ' + trimmed;
+            previous = { field: 'Designation', hasSuffix };
+        };
+
+        // 1. An honorific ("Mr.", "Dr ", "Prof.") at the START of an author value that also
+        //    carries a mapping suffix ("Dr. Arunpriya S1") is an unambiguous name marker. The value
+        //    must not hold commas or an institution word, so an institution named after someone
+        //    ("Dr. A.P.J. Abdul Kalam Technical University, Lucknow, India1") stays an affiliation.
+        //    The dot or space after the honorific keeps ordinary names ("Mrinal1", "Drithi1") out.
+        const honorificName = parsed.some(item =>
+            /^\(?(Mr|Mrs|Ms|Dr|Prof)(\.|\s)/i.test(item.val.trim()) && /\d/.test(item.suffix)
+            && !item.val.includes(',') && !INSTITUTION_RE.test(item.val));
+        if (honorificName) {
+            asName();
             return;
         }
 
@@ -415,9 +520,17 @@ function parseDataInput(text) {
         //    superscript-tagged suffixed line, reads unambiguously as a name list -- a real
         //    paper title is essentially never formatted this way. This runs BEFORE any
         //    keyword/title heuristic so an ordinary line like "Ravi Kumar1, Anita Rao2" is
-        //    never mistaken for prose.
-        if (hasSuffix && noInnerCommas && ((parsed.length >= 2 && allShort) || hadSuperscript)) {
-            addName(trimmed, origLines[i]);
+        //    never mistaken for prose. A list of institutions ("Anna University1, Madras
+        //    University2") has the same shape, so institution words rule it out.
+        if (hasSuffix && noInnerCommas && noInstitutions && ((parsed.length >= 2 && allShort) || hadSuperscript)) {
+            asName();
+            return;
+        }
+
+        // 2b. The tail of an affiliation wrapped without a trailing comma: the previous line was
+        //     an unsuffixed affiliation and this one supplies the suffix ("Chennai, India1").
+        if (openDesignation && hasSuffix && (commaCount >= 1 || hasKeyword)) {
+            extendDesignation();
             return;
         }
 
@@ -425,62 +538,72 @@ function parseDataInput(text) {
         //    app's own example) -- caught before the ambiguous single-value rule below, and
         //    before the prose-title rule since it's under that rule's 4-word floor.
         const singleValueTitleHint = parsed.length === 1 && TITLE_HINT_RE.test(parsed[0].val);
-        if (hasSuffix && noInnerCommas && parsed.length === 1 && singleValueTitleHint) {
-            classification.PaperTitle.push(trimmed);
+        if (hasSuffix && singleValueTitleHint && (noInnerCommas || !hasKeyword)) {
+            asTitle();
             return;
         }
 
-        // 3b. A single short (<=3 word) suffixed value with no commas -- e.g. "Ravi Kumar1" or
-        //     "Deep Learning Advances1-3" -- is ambiguous between a lone recipient's name and a
-        //     short paper title. Deferred to ambiguousShortValues for resolution after the loop
-        //     (see below) instead of guessed here.
-        if (hasSuffix && noInnerCommas && parsed.length === 1 &&
-            singleValWords >= 1 && singleValWords <= 3 && parsed[0].val.length < 28 && !singleValueTitleHint) {
-            ambiguousShortValues.push({ trimmed, orig: origLines[i] });
+        // 3b. A single short suffixed value with no commas -- e.g. "Ravi Kumar1" or "Deep Learning
+        //     Advances1-3" -- is ambiguous between a lone recipient's name and a short paper
+        //     title. Longer values qualify if they read like a name ("Ravi Kumar Singh Yadav1").
+        //     Deferred to ambiguousShortValues for resolution after the loop (see below).
+        const shortValue = singleValWords >= 1 && singleValWords <= 3 && parsed.length === 1 && parsed[0].val.length < 28;
+        const longName = singleValWords > 3 && singleValWords <= 5 && parsed.length === 1
+            && parsed[0].val.length < 50 && !NOT_A_NAME_RE.test(parsed[0].val);
+        if (hasSuffix && noInnerCommas && noInstitutions && !startsWithKeyword && (shortValue || longName)) {
+            ambiguousShortValues.push({ trimmed, orig: origLines[i], words: singleValWords });
+            previous = { field: 'Ambiguous', hasSuffix };
             return;
         }
 
-        // 4. Prose paper title: few commas, several words, and not an affiliation line. This
-        //    runs before the keyword check below so an ordinary title that happens to contain
-        //    one affiliation word ("...Student Performance in Indian Universities") isn't
-        //    swallowed as a Designation -- but a line that STARTS with a keyword ("Department
-        //    of...") or piles up 2+ of them still reads as an affiliation.
-        if (commaCount <= 1 && totalWords >= 4 && !startsWithKeyword && keywordMatches.length < 2) {
-            classification.PaperTitle.push(trimmed);
+        if (!hasSuffix) {
+            // 4. Lines with no suffix. These can't be names, so the choice is title or
+            //    affiliation, and keywords alone can't decide it: "Research Scholar Perceptions
+            //    of University Faculty" is a title. Wrapped lines stay with what they continue.
+            if (openDesignation) {
+                extendDesignation();
+                return;
+            }
+            if (openTitle && commaCount === 0) {
+                asTitle();
+                return;
+            }
+            const firstLineProse = i === 0 && commaCount <= 1 && totalWords >= 4;
+            const commaFreeProse = commaCount === 0 && totalWords >= 4 && !startsWithKeyword
+                && (keywordMatches.length < 2 || classification.PaperTitle.length === 0);
+            const oneCommaProse = commaCount === 1 && totalWords >= 4 && !startsWithKeyword && keywordMatches.length < 2;
+            if (firstLineProse || commaFreeProse || oneCommaProse) {
+                asTitle();
+                return;
+            }
+            if (hasKeyword) asDesignation();
+            else asTitle();
             return;
         }
 
-        // 5. Academic/corporate keywords mark an affiliation/designation line.
-        if (hasKeyword) {
-            classification.Designation.push(trimmed);
+        // 5. Prose paper title with a suffix: several words, no comma, and not an affiliation. A
+        //    comma plus a suffix is an affiliation ("Assistant Professor, SRM Institute1").
+        if (commaCount === 0 && totalWords >= 4 && !startsWithKeyword && keywordMatches.length < 2) {
+            asTitle();
             return;
         }
 
-        // 6. Any other suffixed line (short, or with internal commas) is an affiliation.
-        if (hasSuffix) {
-            classification.Designation.push(trimmed);
-            return;
-        }
-
-        // 7. No suffix at all -> a constant paper title.
-        classification.PaperTitle.push(trimmed);
+        // 6. Anything else with a suffix is an affiliation.
+        asDesignation();
     });
 
     // Resolve the deferred single-short-value lines (rule 3b): if a stronger, unambiguous name
-    // signal was found elsewhere, these are almost certainly short paper titles -- each mapped
-    // by its own suffix (or applied to every certificate if its suffix doesn't resolve). If
-    // nothing else looked like a name, they're promoted to NAME instead, so a lone recipient on
-    // a line by itself ("Ravi Kumar1") still works.
+    // signal was found elsewhere, these are almost certainly short paper titles. If nothing else
+    // looked like a name, they're promoted to NAME instead, so a lone recipient on a line by
+    // itself ("Ravi Kumar1") still works.
     if (classification.NAME.length > 0) {
         ambiguousShortValues.forEach(({ trimmed }) => classification.PaperTitle.push(trimmed));
     } else {
-        // Two ambiguous single-value lines can still target the SAME certificate index (e.g. a
-        // title mistakenly suffixed "1" sitting next to a name also suffixed "1") -- promoting
-        // both to NAME would let the second silently overwrite the first. Only the first line to
-        // claim a given index is promoted; anything colliding with an already-claimed index
-        // falls back to PaperTitle instead of clobbering it.
+        // Two ambiguous lines can target the SAME certificate index (e.g. a short title suffixed
+        // "1" next to a name also suffixed "1"). The value with the fewest words claims the index,
+        // since names are shorter than titles; the rest fall back to PaperTitle.
         const claimedIndexes = new Set();
-        ambiguousShortValues.forEach(({ trimmed, orig }) => {
+        [...ambiguousShortValues].sort((a, b) => a.words - b.words).forEach(({ trimmed, orig }) => {
             const indexes = parseMappingLine(trimmed).reduce((acc, it) => acc.concat(parseSuffix(it.suffix)), []);
             const collides = indexes.some(idx => claimedIndexes.has(idx));
             if (collides) {
@@ -492,22 +615,10 @@ function parseDataInput(text) {
         });
     }
 
-    // Fallback: nothing looked like a name, but a line carries mapping suffixes -- promote the
-    // first such line (affiliations are checked before titles) rather than failing outright.
+    // We must have at least one NAME line to determine the count. Never promote an affiliation or
+    // title to stand in for one: that prints an institution as the recipient's name.
     if (classification.NAME.length === 0) {
-        for (const pool of [classification.Designation, classification.PaperTitle]) {
-            const idx = pool.findIndex(l => parseMappingLine(l).some(it => /\d/.test(it.suffix)));
-            if (idx !== -1) {
-                const [line] = pool.splice(idx, 1);
-                addName(line, line);
-                break;
-            }
-        }
-    }
-
-    // We must have at least one NAME line to determine the count
-    if (classification.NAME.length === 0) {
-        throw new Error("Could not detect any Name line. Add a numeric suffix to at least one name, e.g. \"Ravi Kumar1\".");
+        throw new Error("Could not detect any Name line. Add a numeric suffix to each name, e.g. \"Ravi Kumar1, Anita Rao2\".");
     }
 
     // The original (superscript-preserved) author-list line(s), used for filenames.
@@ -545,33 +656,59 @@ function parseDataInput(text) {
         });
     });
 
-    // Map a "field, suffix" line onto records.
+    // Map a "field, suffix" line onto records. Two affiliations for one author are both kept.
+    const setField = (record, field, value) => {
+        const existing = record[field];
+        record[field] = field === 'Designation' && existing && existing !== value
+            ? `${existing}, ${value}`
+            : value;
+    };
     function applyMappedLine(line, field) {
         const items = parseMappingLine(line);
         let mapped = 0;
         items.forEach(item => {
             parseSuffix(item.suffix).forEach(idx => {
-                if (inRange(idx)) { records[idx - 1][field] = item.val; mapped++; }
+                if (inRange(idx)) { setField(records[idx - 1], field, item.val); mapped++; }
             });
         });
         // No suffix pointed at a real certificate -- either the line never had one (a constant
-        // value meant for every certificate) or its suffix(es) were all out of range (most
-        // likely a trailing number that isn't a mapping index, e.g. "Industry 4.0"). Either way,
+        // value meant for every certificate) or its suffix(es) were all out of range. Either way,
         // apply the item's TEXT with its suffix digits already stripped, never the raw line --
         // otherwise an out-of-range case like "...India3" with only 2 certificates would print
         // the literal "3" onto every certificate.
         if (mapped === 0) {
             const fallbackText = items.length > 0 ? items.map(it => it.val).join(', ') : line;
-            records.forEach(record => { record[field] = fallbackText; });
+            records.forEach(record => { setField(record, field, fallbackText); });
         }
     }
 
+    const warnings = [];
+
     classification.Designation.forEach(line => applyMappedLine(line, 'Designation'));
-    classification.PaperTitle.forEach(line => applyMappedLine(line, 'PaperTitle'));
+
+    // A paper has one title, so a lone title line belongs on every certificate. If its trailing
+    // number doesn't cover them all, the number is part of the title ("...Using Web3", "...YOLOv8")
+    // rather than a mapping. Only several title lines are mapped per certificate.
+    if (classification.PaperTitle.length === 1) {
+        const line = classification.PaperTitle[0];
+        const covered = new Set();
+        parseMappingLine(line).forEach(item => {
+            parseSuffix(item.suffix).filter(inRange).forEach(idx => covered.add(idx));
+        });
+        if (covered.size === maxIdx) {
+            applyMappedLine(line, 'PaperTitle');
+        } else {
+            records.forEach(record => { record.PaperTitle = line; });
+            if (covered.size > 0) {
+                warnings.push(`The number at the end of the paper title was kept as part of the title: "${line}".`);
+            }
+        }
+    } else {
+        classification.PaperTitle.forEach(line => applyMappedLine(line, 'PaperTitle'));
+    }
 
     // A gap in the suffix sequence (e.g. "Alice1, Bob3" with no "2") leaves a record with no
     // NAME at all. Rather than silently exporting a blank certificate, drop it and warn instead.
-    const warnings = [];
     const skippedIndexes = [];
     const filledRecords = [];
     records.forEach((record, i) => {
@@ -589,9 +726,24 @@ function parseDataInput(text) {
         warnings.push(`${maxIdx} certificates were requested — double-check the suffix ranges if that's more than you intended.`);
     }
 
+    // A blank title or designation prints as an empty line on the certificate.
+    const missingNumbers = field => filledRecords
+        .map((record, i) => (record[field] ? 0 : i + 1))
+        .filter(Boolean);
+    const noTitle = missingNumbers('PaperTitle');
+    if (noTitle.length > 0) warnings.push(`No paper title found for certificate #${noTitle.join(', #')}.`);
+    const noDesignation = missingNumbers('Designation');
+    if (noDesignation.length > 0) warnings.push(`No designation found for certificate #${noDesignation.join(', #')}.`);
+
+    const tooLong = [];
+    filledRecords.forEach((record, i) => {
+        if (!textFits(record)) tooLong.push(i + 1);
+    });
+    if (tooLong.length > 0) warnings.push(tooLongMessage(`Certificate #${tooLong.join(', #')}`));
+
     // Apply the publication details (DOI-derived or hand-entered) as constants to every certificate.
     const pub = getPublicationInfo();
-    if (pub.error) warnings.push(pub.error);
+    if (pub.note) warnings.push(pub.note);
     filledRecords.forEach(record => {
         record.DOI = pub.doi;
         record.Volume = pub.vol;
@@ -600,7 +752,37 @@ function parseDataInput(text) {
         record.Month = pub.month;
     });
 
-    return { records: filledRecords, authorListLine, warnings };
+    return {
+        records: filledRecords,
+        authorListLine,
+        warnings,
+        publicationIssue: describePublicationIssue(pub)
+    };
+}
+
+// Whether a record's text fits the selected template's fixed text box (see SAFE_TEXT_SIZES).
+function textFits(record) {
+    const sizes = SAFE_TEXT_SIZES[state.templateKey];
+    if (!sizes) return true;
+    const title = (record.PaperTitle || '').length;
+    const designation = (record.Designation || '').length;
+    return sizes.some(([maxTitle, maxDesignation]) => title <= maxTitle && designation <= maxDesignation);
+}
+
+function tooLongMessage(subject) {
+    return `${subject}: the title and designation may be too long for the ${state.templateKey} certificate, so the Volume or DOI line can be cut off. Check the Word file before sending it.`;
+}
+
+// Why the certificates can't be generated yet, or '' if the publication details are complete.
+function describePublicationIssue(pub) {
+    if (pub.error) return pub.error;
+    if (state.doiMode === 'with' && !pub.doi) {
+        return 'Enter the DOI in section 3 before downloading, or switch to Without DOI.';
+    }
+    const missing = [['volume', pub.vol], ['issue', pub.issue], ['year', pub.year]]
+        .filter(([, value]) => !value)
+        .map(([label]) => label);
+    return missing.length > 0 ? `Enter the ${missing.join(', ')} in section 3 before downloading.` : '';
 }
 
 function parseSuffix(suffix) {
@@ -615,9 +797,12 @@ function parseSuffix(suffix) {
             let end = parseInt(parts[1], 10);
             if (!isNaN(start) && !isNaN(end)) {
                 if (start > end) { [start, end] = [end, start]; } // tolerate an inverted range like "5-2"
-                for (let i = Math.max(start, 1); i <= end; i++) {
+                // Stop at the certificate limit. The real end is still reported, so the caller can
+                // reject the range without building an array of millions of numbers first.
+                for (let i = Math.max(start, 1); i <= Math.min(end, MAX_CERTIFICATES); i++) {
                     indexes.push(i);
                 }
+                if (end > MAX_CERTIFICATES) indexes.push(end);
             }
         } else {
             const idx = parseInt(part, 10);
@@ -629,33 +814,47 @@ function parseSuffix(suffix) {
     return indexes;
 }
 
-// Extract the journal "file number" from a DOI, e.g. "10.17148/IJARCCE.2026.15817" -> "17"
-// (the last 2 digits of the final numeric segment: VOLUME(15) + ISSUE(8) + FILE(17)). Purely
-// cosmetic (used only in filenames), so it stays permissive even when parseDoiParts rejects the
-// DOI for the certificate fields themselves.
-function extractPaperNumber(doi) {
-    if (!doi) return '';
-    const runs = doi.match(/\d+/g);
-    if (!runs || runs.length === 0) return '';
-    return runs[runs.length - 1].slice(-2);
-}
-
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
                      'July', 'August', 'September', 'October', 'November', 'December'];
 
-// Extract Volume/Issue/Year/Month encoded in a DOI, e.g. "10.17148/IJARCCE.2026.15817" ->
-// { vol: "15", issue: "8", year: "2026", month: "August" }. The final numeric segment packs
-// VOLUME(2 digits) + ISSUE + FILE NUMBER(2 digits), so the issue is whatever sits between them
-// -- one digit for issues 1-9, two for issues 10-12. The segment before it is the year.
+// Reduce whatever was pasted to the bare DOI, so "DOI: 10.1234/x" and "https://doi.org/10.1234/x"
+// don't print the prefix on the certificate after the template's own "DOI:" label.
+function cleanDoi(raw) {
+    return raw
+        .trim()
+        .replace(/^(?:https?:\/\/)?(?:dx\.)?doi\.org\//i, '')
+        .replace(/^doi\s*:?\s*/i, '')
+        .replace(/\s+/g, '');
+}
+
+// Digit layouts for the DOI's final number, as [volume, issue, file number] lengths, most likely
+// first. Layouts of a different total length are skipped.
+const DOI_LAYOUTS = [[2, 2, 2], [2, 1, 2], [2, 1, 3], [2, 2, 3], [1, 2, 2], [1, 1, 2]];
+
+function decodeDoiNumber(digits, maxVolume) {
+    return DOI_LAYOUTS
+        .filter(([v, i, f]) => v + i + f === digits.length)
+        .map(([v, i]) => ({
+            vol: parseInt(digits.slice(0, v), 10),
+            issue: parseInt(digits.slice(v, v + i), 10),
+            file: digits.slice(v + i)
+        }))
+        .filter(c => c.vol >= 1 && c.vol <= maxVolume && c.issue >= 1 && c.issue <= 12);
+}
+
+// Extract Volume/Issue/Year/Month/file number encoded in a DOI, e.g.
+// "10.17148/IJARCCE.2026.15817" -> { vol: "15", issue: "8", year: "2026", month: "August",
+// fileNumber: "17" }. The final numeric segment packs VOLUME + ISSUE + FILE NUMBER, and the segment
+// before it is the year. The usual layout is 2 + 1 or 2 + 2 digits, with variants tried when that
+// can't be right: a 3-digit file number ("158117") or a 1-digit volume ("91217", "1207").
 //
 // The issue number IS the month of publication (issue 7 = July, issue 9 = September), so the
 // month is derived rather than entered by hand.
 //
-// An empty DOI is a normal "not entered yet" state (no error). A non-empty DOI that doesn't
-// decode cleanly returns an explicit `error` message instead of silently blank fields, so a
-// malformed DOI doesn't ship a certificate with an empty volume/issue/month.
+// An empty DOI returns blank fields. A non-empty DOI that doesn't decode cleanly returns an
+// `error`, which blocks downloads. `note` flags a decoded DOI that has a second possible reading.
 function parseDoiParts(doi) {
-    const empty = { vol: '', issue: '', year: '', month: '', error: '' };
+    const empty = { vol: '', issue: '', year: '', month: '', fileNumber: '', error: '', note: '' };
     if (!doi) return empty;
 
     const runs = doi.match(/\d+/g);
@@ -668,40 +867,54 @@ function parseDoiParts(doi) {
     if (year.length !== 4) {
         return { ...empty, error: `Couldn't find a 4-digit year in the DOI "${doi}" (found "${year}").` };
     }
-    if (last.length < 5) {
-        return { vol: '', issue: '', year, month: '', error: `The DOI's final number ("${last}") is too short to contain a volume, issue and file number.` };
+    const yearNum = parseInt(year, 10);
+    if (yearNum < FIRST_JOURNAL_YEAR || yearNum > new Date().getFullYear() + 1) {
+        return { ...empty, error: `The year ${year} in the DOI "${doi}" isn't possible for these journals.` };
     }
 
-    const vol = String(parseInt(last.slice(0, 2), 10));
-    const issueNum = parseInt(last.slice(2, -2), 10);
-    if (isNaN(issueNum) || issueNum < 1 || issueNum > 12) {
-        return { vol, issue: '', year, month: '', error: `The DOI's issue digits don't resolve to a valid month (1-12).` };
+    const candidates = decodeDoiNumber(last, yearNum - FIRST_JOURNAL_YEAR + 1);
+    if (candidates.length === 0) {
+        return { ...empty, error: `Couldn't read a valid volume and issue from "${last}" in the DOI. If it's correct, use Without DOI and enter the details by hand.` };
     }
 
-    return { vol, issue: String(issueNum), year, month: MONTH_NAMES[issueNum - 1], error: '' };
+    const chosen = candidates[0];
+    // "151117" is issue 11 + file 17 or issue 1 + file 117. A file number starting with 0 is padded
+    // to 2 digits, not 3, so that alone isn't a second reading.
+    const alternative = candidates.find(c => c.issue !== chosen.issue && !c.file.startsWith('0'));
+    const note = alternative
+        ? `Check the DOI: "${last}" was read as issue ${chosen.issue} (${MONTH_NAMES[chosen.issue - 1]}), file ${chosen.file}, but it could also be issue ${alternative.issue} (${MONTH_NAMES[alternative.issue - 1]}), file ${alternative.file}.`
+        : '';
+
+    return {
+        vol: String(chosen.vol),
+        issue: String(chosen.issue),
+        year,
+        month: MONTH_NAMES[chosen.issue - 1],
+        fileNumber: chosen.file,
+        error: '',
+        note
+    };
 }
 
 // The single source of truth for volume/issue/year/month/file number, resolved from whichever
 // input mode is active. In "with DOI" mode everything is decoded from the DOI; in "without DOI"
 // mode the user supplies volume, issue, file number and year by hand. The issue number sets the
-// month in both modes, so that rule never has to be restated by the user. Either mode can return
-// a non-empty `error` describing why a field came out blank/unreliable -- an empty field the
-// user simply hasn't filled in yet is not an error.
+// month in both modes, so that rule never has to be restated by the user. An `error` means a value
+// can't be trusted; it and any missing field block downloads (see describePublicationIssue).
 function getPublicationInfo() {
     if (state.doiMode === 'with') {
-        const doi = el.doiInput.value.trim();
-        const parts = parseDoiParts(doi);
-        return { doi, ...parts, fileNumber: extractPaperNumber(doi) };
+        const doi = cleanDoi(el.doiInput.value);
+        return { doi, ...parseDoiParts(doi) };
     }
 
     const volRaw = el.volInput.value.trim();
     const issueRaw = el.issueInput.value.trim();
     const yearRaw = el.yearInput.value.trim();
     const fileRaw = el.fileNumInput.value.trim();
-    const issueNum = parseInt(issueRaw, 10);
+    const issueNum = /^\d{1,2}$/.test(issueRaw) ? parseInt(issueRaw, 10) : NaN;
 
     let error = '';
-    if (volRaw && !/^\d+$/.test(volRaw)) {
+    if (volRaw && !/^[1-9]\d*$|^0+[1-9]\d*$/.test(volRaw)) {
         error = `Volume "${volRaw}" isn't a number.`;
     } else if (issueRaw && (isNaN(issueNum) || issueNum < 1 || issueNum > 12)) {
         error = `Issue "${issueRaw}" must be a number from 1 to 12 (it sets the month).`;
@@ -711,12 +924,13 @@ function getPublicationInfo() {
 
     return {
         doi: '',
-        vol: volRaw,
+        vol: error || !volRaw ? volRaw : String(parseInt(volRaw, 10)),
         issue: isNaN(issueNum) ? '' : String(issueNum),
         year: yearRaw,
         month: MONTH_NAMES[issueNum - 1] || '',
         fileNumber: fileRaw,
-        error
+        error,
+        note: ''
     };
 }
 
@@ -747,14 +961,10 @@ function buildCombinedFilename() {
 
 // Build the output filename (without extension) for one certificate in "Multiple Downloads" mode:
 // "{fileNumber} {full author-list line} {certIndex}" -- every file shares the same base name and
-// differs only by the trailing 1-based certificate index.
+// differs only by the trailing 1-based certificate index. The index goes on after sanitizing, so
+// the length cap on a long author list can't cut it off and give every file the same name.
 function buildIndividualFilename(index) {
-    const { fileNumber } = getPublicationInfo();
-    const parts = [];
-    if (fileNumber) parts.push(fileNumber);
-    if (state.authorListLine) parts.push(state.authorListLine);
-    parts.push(String(index + 1));
-    return sanitizeFilename(parts.join(' ').trim());
+    return `${buildCombinedFilename()} ${index + 1}`;
 }
 
 // Collapse a list of values to their distinct entries (first-occurrence order, empties dropped),
@@ -774,7 +984,7 @@ function dedupeJoin(values) {
 function buildGroupRecord() {
     const first = state.records[0] || {};
     return {
-        NAME: state.records.map(r => r.NAME).join(', '),
+        NAME: dedupeJoin(state.records.map(r => r.NAME)),
         Designation: dedupeJoin(state.records.map(r => r.Designation)),
         PaperTitle: dedupeJoin(state.records.map(r => r.PaperTitle)),
         DOI: first.DOI,
@@ -1082,8 +1292,8 @@ function neutralizeBraces(value) {
 }
 
 // 3. Generate a filled DOCX package (PizZip instance) for one record
-function renderDocxZipForRecord(record) {
-    const docZip = new window.PizZip(state.docxBuffer);
+function renderDocxZipForRecord(record, templateBuffer = state.docxBuffer) {
+    const docZip = new window.PizZip(templateBuffer);
 
     const name = neutralizeBraces(record.NAME ? record.NAME.toUpperCase() : '');
     const designation = neutralizeBraces(record.Designation || '');
@@ -1104,6 +1314,7 @@ function renderDocxZipForRecord(record) {
         designation: designation,
         papertitle: paperTitle,
         doi: doi,
+        hasdoi: !!doi,
         vol: vol,
         volume: vol,
         issue: issue,
@@ -1132,6 +1343,9 @@ function renderDocxZipForRecord(record) {
         papertitle: paperTitle,
         DOI: doi,
         doi: doi,
+        // Templates wrap each "DOI: {DOI}" line in {#hasDoi}...{/hasDoi}, so with no DOI the whole
+        // line (label included) is dropped instead of leaving a dangling "DOI:".
+        hasDoi: !!doi,
         vol: vol,
         Volume: vol,
         issue: issue,
@@ -1147,8 +1361,8 @@ function renderDocxZipForRecord(record) {
     return doc.getZip();
 }
 
-function renderDocxBlobForRecord(record) {
-    return renderDocxZipForRecord(record).generate({
+function renderDocxBlobForRecord(record, templateBuffer = state.docxBuffer) {
+    return renderDocxZipForRecord(record, templateBuffer).generate({
         type: "blob",
         mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     });
@@ -1268,9 +1482,14 @@ async function runDownload(btnEl, task) {
         log('Enter recipient data first — at least one name with a numeric suffix (e.g. "Ravi Kumar1").', 'error');
         return;
     }
+    if (state.publicationBlocked) {
+        log('Complete the publication details in section 3 first.', 'error');
+        return;
+    }
 
     const initialHTML = btnEl.innerHTML;
-    toggleButtons(false);
+    state.downloading = true;
+    refreshDownloadButtons();
     btnEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Generating...';
 
     try {
@@ -1279,7 +1498,8 @@ async function runDownload(btnEl, task) {
         logRenderError(err);
     } finally {
         btnEl.innerHTML = initialHTML;
-        toggleButtons(state.docxLoaded && state.records.length > 0);
+        state.downloading = false;
+        refreshDownloadButtons();
     }
 }
 
@@ -1296,14 +1516,18 @@ async function handleDownloadAllInOne() {
 // 4b. Multiple Downloads: one separate Word file per recipient, triggered in sequence. Each
 // download is staggered slightly so Chrome doesn't drop downloads fired in the same tick; the
 // browser may show a one-time "this site wants to download multiple files" prompt after the
-// second file, which is expected.
+// second file, which is expected. The staggering leaves time for the page to be edited mid-run, so
+// the batch works from a snapshot taken at the start: all its files match what was on screen.
 async function handleDownloadMultiple() {
     await runDownload(el.btnDownloadMulti, async () => {
-        const total = state.records.length;
+        const records = [...state.records];
+        const templateBuffer = state.docxBuffer;
+        const filenames = records.map((_, i) => buildIndividualFilename(i));
+        const total = records.length;
         log(`Generating ${total} individual certificate(s)...`, 'system');
         for (let i = 0; i < total; i++) {
-            const blob = renderDocxBlobForRecord(state.records[i]);
-            triggerDownload(blob, `${buildIndividualFilename(i)}.docx`);
+            const blob = renderDocxBlobForRecord(records[i], templateBuffer);
+            triggerDownload(blob, `${filenames[i]}.docx`);
             log(`Downloaded certificate ${i + 1} of ${total}.`, 'success');
             if (i < total - 1) await new Promise(resolve => setTimeout(resolve, 250));
         }
@@ -1315,7 +1539,9 @@ async function handleDownloadMultiple() {
 async function handleDownloadGroup() {
     await runDownload(el.btnDownloadGroup, async () => {
         log(`Generating one combined certificate for all ${state.records.length} author(s)...`, 'system');
-        const blob = buildCombinedDocxBlob([buildGroupRecord()]);
+        const groupRecord = buildGroupRecord();
+        if (!textFits(groupRecord)) log(tooLongMessage('Group certificate'), 'error');
+        const blob = buildCombinedDocxBlob([groupRecord]);
         triggerDownload(blob, `${buildCombinedFilename()}.docx`);
         log(`Successfully generated and downloaded the group certificate!`, 'success');
     });
