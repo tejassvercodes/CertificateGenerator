@@ -45,7 +45,8 @@ try {
 
     foreach ($file in $files) {
         $inPath = $file.FullName
-        $outPath = Join-Path $OutputDir ($file.BaseName + '.pdf')
+        # Must be a plain .NET string: with Join-Path's result, SaveAs2 never returns.
+        [string]$outPath = [System.IO.Path]::Combine([string]$OutputDir, $file.BaseName + '.pdf')
         Write-Output "OPEN $($file.Name)"
 
         $doc = $null
@@ -69,7 +70,9 @@ try {
 }
 finally {
     if ($null -ne $word) {
-        $word.Quit($wdDoNotSaveChanges)
+        # No argument: Quit(0) throws under Windows PowerShell 5.1 and leaves Word running.
+        # Every document is already closed by this point.
+        $word.Quit()
         [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($word)
     }
     [GC]::Collect()

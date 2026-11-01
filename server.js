@@ -16,9 +16,12 @@ const crypto = require('crypto');
 const { execFile } = require('child_process');
 
 const PORT = process.env.PORT || 8080;
+// Local tool: reachable from this machine only, unless HOST is set deliberately.
+const HOST = process.env.HOST || '127.0.0.1';
 const ROOT = __dirname;
 const PS_SCRIPT = path.join(ROOT, 'convert-docx-to-pdf.ps1');
 const MAX_BODY_BYTES = 256 * 1024 * 1024; // generous: base64 DOCX batches inflate ~33%
+const CONVERT_TIMEOUT_MS = 5 * 60 * 1000; // a stuck Word must fail the request, not hang it forever
 
 const MIME = {
     '.html': 'text/html; charset=utf-8',
@@ -64,7 +67,7 @@ function runPowerShell(args) {
         execFile(
             'powershell.exe',
             ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', ...args],
-            { windowsHide: true, maxBuffer: 32 * 1024 * 1024 },
+            { windowsHide: true, maxBuffer: 32 * 1024 * 1024, timeout: CONVERT_TIMEOUT_MS },
             (err, stdout, stderr) => {
                 if (err) {
                     reject(new Error(`${err.message}\n${stderr || ''}`.trim()));
@@ -83,10 +86,30 @@ function safeBaseName(name, fallback) {
     return cleaned || fallback;
 }
 
+// Requests without an Origin header aren't from a web page. A sandboxed page sends "null", which
+// isn't a parseable URL, so a bad value counts as foreign rather than throwing.
+function isSameOrigin(req) {
+    const origin = req.headers.origin;
+    if (!origin) return true;
+    try {
+        return new URL(origin).host === req.headers.host;
+    } catch {
+        return false;
+    }
+}
+
 // POST /api/convert
 // Body: { files: [{ name: "cert 1", data: "<base64 docx>" }, ...] }
 // Returns: { files: [{ name: "cert 1", data: "<base64 pdf>" }, ...] }
 async function handleConvert(req, res) {
+    // Any website open in the browser can POST to localhost. Requiring JSON forces a CORS preflight,
+    // which this server never approves, and a foreign Origin header is refused outright.
+    const contentType = String(req.headers['content-type'] || '').toLowerCase();
+    if (!isSameOrigin(req) || !contentType.startsWith('application/json')) {
+        sendJson(res, 403, { error: 'Only same-origin JSON requests are accepted.' });
+        return;
+    }
+
     let payload;
     try {
         const raw = await readBody(req);
@@ -151,35 +174,31 @@ async function handleConvert(req, res) {
     }
 }
 
-// Files/extensions that must never be served even though they live under the project root:
-// server-side source, the PDF-conversion script, docs, and any dotfile/dotdir (.git,
-// .claude/settings.local.json, .vercelignore, ...). Everything else under ROOT (index.html,
-// app.js, styles.css, templates/, logos/) is meant to be public.
-const DENY_BASENAMES = new Set(['server.js', 'convert-docx-to-pdf.ps1']);
-const DENY_EXTENSIONS = new Set(['.ps1', '.md']);
+// Only the site itself is public. An allowlist rather than a denylist, because Windows paths are
+// loose: "/Server.js" and "/server.js::$DATA" both open server.js. Matching is case-sensitive and a
+// colon is refused, so neither spelling gets through.
+const PUBLIC_FILES = new Set(['index.html', 'app.js', 'styles.css']);
+const PUBLIC_DIRS = ['templates/', 'logos/'];
 function isServable(relPath) {
-    const segments = relPath.split(/[\\/]/).filter(Boolean);
-    if (segments.some(seg => seg.startsWith('.'))) return false;
-    const base = path.basename(relPath);
-    if (DENY_BASENAMES.has(base)) return false;
-    if (DENY_EXTENSIONS.has(path.extname(relPath).toLowerCase())) return false;
-    return true;
+    if (relPath.includes(':') || relPath.includes('\\')) return false;
+    if (relPath.split('/').some(seg => seg.startsWith('.'))) return false;
+    return PUBLIC_FILES.has(relPath) || PUBLIC_DIRS.some(dir => relPath.startsWith(dir));
 }
 
 async function serveStatic(req, res) {
-    const urlPath = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
-    const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
-    const filePath = path.join(ROOT, rel);
-
-    // Prevent path traversal outside the project directory
-    if (!filePath.startsWith(ROOT + path.sep) && filePath !== path.join(ROOT, 'index.html')) {
-        send(res, 403, 'Forbidden');
+    let urlPath;
+    try {
+        urlPath = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+    } catch {
+        send(res, 400, 'Bad request');
         return;
     }
+    const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
     if (!isServable(rel)) {
         send(res, 403, 'Forbidden');
         return;
     }
+    const filePath = path.join(ROOT, rel);
 
     try {
         const data = await fsp.readFile(filePath);
@@ -206,7 +225,7 @@ if (!fs.existsSync(PS_SCRIPT)) {
     console.error(`Missing ${PS_SCRIPT} - DOCX to PDF conversion will not work.`);
 }
 
-server.listen(PORT, () => {
-    console.log(`Certificate Generator running at http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+    console.log(`Certificate Generator running at http://${HOST}:${PORT}`);
     console.log('DOCX to PDF conversion uses Microsoft Word (COM automation).');
 });
