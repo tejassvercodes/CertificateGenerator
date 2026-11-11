@@ -7,8 +7,8 @@
 // adding a journal only means adding an entry here plus its .docx/logo files.
 const TEMPLATES = [
     { key: 'CCE', fullName: 'IJARCCE',   file: 'templates/CCE.docx', logo: 'logos/CCE.jpg' },
-    { key: 'SET', fullName: 'IARJSET',   file: 'templates/SET.docx', logo: 'logos/SET.jpg' },
     { key: 'ICE', fullName: 'IJIREEICE', file: 'templates/ICE.docx', logo: 'logos/ICE.jpg' },
+    { key: 'SET', fullName: 'IARJSET',   file: 'templates/SET.docx', logo: 'logos/SET.jpg' },
     { key: 'RJR', fullName: 'IMRJR',     file: 'templates/RJR.docx', logo: 'logos/RJR.jpg' }
 ];
 

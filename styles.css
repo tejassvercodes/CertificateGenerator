@@ -289,8 +289,14 @@ body {
 
 .manual-row {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 0.7rem;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.5rem;
+}
+
+/* Compact inputs so Volume / Issue / Year / File number fit on one row. */
+.manual-grid .doi-field {
+    padding: 0.4rem 0.5rem;
+    font-size: 0.75rem;
 }
 
 .manual-grid label {
