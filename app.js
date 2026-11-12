@@ -1541,7 +1541,7 @@ function updateFormatNote() {
     if (state.wordAvailable === true) {
         el.formatNote.textContent = 'PDFs are exported by Microsoft Word on this computer, so they match the Word file exactly.';
     } else if (state.wordAvailable === false) {
-        el.formatNote.textContent = 'PDF export needs the local Word converter, which this page cannot reach. On a Windows PC with Microsoft Word, double-click start.bat in the project folder (it opens this page at http://127.0.0.1:8080), then pick PDF again. Or choose Word (.docx).';
+        el.formatNote.textContent = 'PDF download is not available on this page: the certificate fonts (Algerian, Engravers MT, ...) only render correctly in Microsoft Word. To get a PDF, choose Word (.docx), download, open the file in Word and use File > Save As > PDF. The PDF then looks exactly like the Word file.';
     } else {
         el.formatNote.textContent = 'Checking for Microsoft Word on this computer...';
     }
