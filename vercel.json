@@ -2,6 +2,7 @@
   "builds": [
     { "src": "index.html", "use": "@vercel/static" },
     { "src": "app.js", "use": "@vercel/static" },
+    { "src": "pdf-export.js", "use": "@vercel/static" },
     { "src": "styles.css", "use": "@vercel/static" },
     { "src": "templates/**", "use": "@vercel/static" },
     { "src": "logos/**", "use": "@vercel/static" }

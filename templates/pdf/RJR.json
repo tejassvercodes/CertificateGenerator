@@ -1,0 +1,237 @@
+{
+ "page": {
+  "width": 841.9000244140625,
+  "height": 595.2999877929688
+ },
+ "box": {
+  "x": 38.24999809265137,
+  "y": 223.49999237060547,
+  "width": 767.4500122070312,
+  "height": 283.5,
+  "insetLeft": 7.199999809265137,
+  "insetTop": 3.5999999046325684,
+  "insetRight": 7.199999809265137,
+  "insetBottom": 3.5999999046325684
+ },
+ "textShadow": null,
+ "fontMetrics": {
+  "Calibri|1|0": {
+   "ascent": 0.95215,
+   "descent": 0.26855
+  },
+  "Nirmala UI|1|0": {
+   "ascent": 1.0791,
+   "descent": 0.25098
+  },
+  "Nirmala UI|0|0": {
+   "ascent": 1.0791,
+   "descent": 0.25098
+  },
+  "Times New Roman|1|0": {
+   "ascent": 0.93359,
+   "descent": 0.21631
+  },
+  "Microsoft PhagsPa|1|0": {
+   "ascent": 1.04395,
+   "descent": 0.23535
+  }
+ },
+ "paragraphs": [
+  {
+   "align": "center",
+   "spaceBefore": 0,
+   "spaceAfter": 0,
+   "line": {
+    "rule": "multiple",
+    "value": 1.5
+   },
+   "leftIndent": 0,
+   "rightIndent": 0,
+   "firstLineIndent": 0,
+   "runs": [
+    {
+     "text": "This is to certify that",
+     "font": "Calibri",
+     "size": 18,
+     "bold": true,
+     "italic": false,
+     "color": "#000000",
+     "spacing": 0,
+     "caps": false,
+     "smallCaps": false,
+     "underline": false,
+     "superscript": false,
+     "subscript": false
+    }
+   ]
+  },
+  {
+   "align": "center",
+   "spaceBefore": 0,
+   "spaceAfter": 0,
+   "line": {
+    "rule": "multiple",
+    "value": 1.5
+   },
+   "leftIndent": 0,
+   "rightIndent": 0,
+   "firstLineIndent": 0,
+   "runs": [
+    {
+     "text": "{NAME}",
+     "font": "Nirmala UI",
+     "size": 24,
+     "bold": true,
+     "italic": false,
+     "color": "#540054",
+     "spacing": 0,
+     "caps": true,
+     "smallCaps": false,
+     "underline": false,
+     "superscript": false,
+     "subscript": false
+    }
+   ]
+  },
+  {
+   "align": "center",
+   "spaceBefore": 0,
+   "spaceAfter": 0,
+   "line": {
+    "rule": "multiple",
+    "value": 1.5
+   },
+   "leftIndent": 0,
+   "rightIndent": 0,
+   "firstLineIndent": 0,
+   "runs": [
+    {
+     "text": "{Designation}",
+     "font": "Nirmala UI",
+     "size": 13,
+     "bold": false,
+     "italic": false,
+     "color": "#000000",
+     "spacing": 0,
+     "caps": false,
+     "smallCaps": false,
+     "underline": false,
+     "superscript": false,
+     "subscript": false
+    }
+   ]
+  },
+  {
+   "align": "center",
+   "spaceBefore": 0,
+   "spaceAfter": 0,
+   "line": {
+    "rule": "multiple",
+    "value": 1.5
+   },
+   "leftIndent": 0,
+   "rightIndent": 0,
+   "firstLineIndent": 0,
+   "runs": [
+    {
+     "text": "Published a paper entitled",
+     "font": "Calibri",
+     "size": 18,
+     "bold": true,
+     "italic": false,
+     "color": "#000000",
+     "spacing": 0,
+     "caps": false,
+     "smallCaps": false,
+     "underline": false,
+     "superscript": false,
+     "subscript": false
+    }
+   ]
+  },
+  {
+   "align": "center",
+   "spaceBefore": 0,
+   "spaceAfter": 0,
+   "line": {
+    "rule": "multiple",
+    "value": 1.5
+   },
+   "leftIndent": 0,
+   "rightIndent": 0,
+   "firstLineIndent": 0,
+   "runs": [
+    {
+     "text": "{Paper Title}",
+     "font": "Nirmala UI",
+     "size": 16,
+     "bold": true,
+     "italic": false,
+     "color": "#993300",
+     "spacing": 0,
+     "caps": false,
+     "smallCaps": false,
+     "underline": false,
+     "superscript": false,
+     "subscript": false
+    }
+   ]
+  },
+  {
+   "align": "center",
+   "spaceBefore": 0,
+   "spaceAfter": 0,
+   "line": {
+    "rule": "multiple",
+    "value": 1.5
+   },
+   "leftIndent": 0,
+   "rightIndent": 0,
+   "firstLineIndent": 0,
+   "runs": [
+    {
+     "text": "Volume {vol}, Issue {issue}, {month} {year}",
+     "font": "Times New Roman",
+     "size": 16,
+     "bold": true,
+     "italic": false,
+     "color": "#000000",
+     "spacing": 0,
+     "caps": false,
+     "smallCaps": false,
+     "underline": false,
+     "superscript": false,
+     "subscript": false
+    }
+   ]
+  },
+  {
+   "align": "center",
+   "spaceBefore": 0,
+   "spaceAfter": 0,
+   "line": {
+    "rule": "multiple",
+    "value": 1.5
+   },
+   "leftIndent": 0,
+   "rightIndent": 0,
+   "firstLineIndent": 0,
+   "runs": [
+    {
+     "text": "{#hasDoi}DOI:  {DOI}{/hasDoi}",
+     "font": "Microsoft PhagsPa",
+     "size": 14,
+     "bold": true,
+     "italic": false,
+     "color": "#000066",
+     "spacing": 0,
+     "caps": false,
+     "smallCaps": false,
+     "underline": false,
+     "superscript": false,
+     "subscript": false
+    }
+   ]
+  }
+ ]
+}

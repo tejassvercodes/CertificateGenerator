@@ -192,7 +192,7 @@ async function handleConvert(req, res) {
 // Only the site itself is public. An allowlist rather than a denylist, because Windows paths are
 // loose: "/Server.js" and "/server.js::$DATA" both open server.js. Matching is case-sensitive and a
 // colon is refused, so neither spelling gets through.
-const PUBLIC_FILES = new Set(['index.html', 'app.js', 'styles.css']);
+const PUBLIC_FILES = new Set(['index.html', 'app.js', 'pdf-export.js', 'styles.css']);
 const PUBLIC_DIRS = ['templates/', 'logos/'];
 function isServable(relPath) {
     if (relPath.includes(':') || relPath.includes('\\')) return false;
