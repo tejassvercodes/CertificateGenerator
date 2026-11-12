@@ -212,3 +212,21 @@ templates; RJR is the important one for layout since it is the only template wit
 
 **Regression on switching.** Click two templates in quick succession and confirm the exported
 file matches the card that is highlighted (#16).
+
+
+---
+
+# PDF export (Word-only)
+
+- Section 4 gets a **Word (.docx) / PDF** switch; the three buttons (All in One, Multiple Downloads,
+  Group Download) work for either format. DOCX blobs are built exactly as before, then for PDF are
+  sent to `POST /api/convert` (Microsoft Word via `convert-docx-to-pdf.ps1`) and the returned PDFs
+  are downloaded.
+- `GET /api/convert/status` (server.js) reports whether Word conversion is possible; the page probes
+  it on load. PDF buttons stay disabled unless it says yes (so on Vercel PDF is off, Word stays on).
+- **Rejected: in-browser PDF** (docx-preview + html2canvas + jsPDF). Tested on all four templates:
+  valid PDFs, but names/titles missing and backgrounds misplaced, because docx-preview mis-lays these
+  templates. Printing wrong certificates is worse than no PDF, so it was removed.
+- Also: Live Preview placeholder/note text darkened (#8a8a7a -> #5f5f52) for contrast.
+- Open option for PDF on a hosted site: run the converter on a Windows host with Word, or a
+  LibreOffice-based service, and point the page at it.

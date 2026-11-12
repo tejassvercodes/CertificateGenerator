@@ -105,12 +105,17 @@
                         <i class="fa-solid fa-download"></i>
                         <h2>4. Download</h2>
                     </div>
+                    <div class="mode-toggle" id="format-toggle">
+                        <button type="button" class="mode-btn active" data-format="docx">Word (.docx)</button>
+                        <button type="button" class="mode-btn" data-format="pdf">PDF</button>
+                    </div>
+                    <p class="hint" id="format-note" hidden></p>
                     <div class="download-options">
                         <button type="button" class="download-option-btn" id="btn-download-all" disabled>
                             <i class="fa-solid fa-file-word"></i>
                             <span class="download-option-text">
                                 <span class="download-option-title">All in One</span>
-                                <span class="download-option-subtitle">Every certificate combined into a single multi-page Word file</span>
+                                <span class="download-option-subtitle">Every certificate combined into a single multi-page file</span>
                             </span>
                         </button>
                         <button type="button" class="download-option-btn" id="btn-download-multi" disabled>

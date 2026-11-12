@@ -50,7 +50,7 @@ Placeholder tags are matched case- and spacing-insensitively (`{Paper Title}`, `
 
    The file number is omitted from any filename if it isn't available in the active mode (e.g. no DOI entered and no manual file number given).
 
-Optionally, running the local server (`node server.js`) exposes `POST /api/convert`, which converts a batch of DOCX files to pixel-faithful PDFs using Microsoft Word's own COM automation (`convert-docx-to-pdf.ps1`) — this requires Windows with Microsoft Word installed. No button in the app calls it. The server listens on `127.0.0.1` only (set `HOST` to change that) and serves only the site's own files.
+**PDF export.** Section 4 has a Word (.docx) / PDF switch. PDFs are produced by Microsoft Word itself (`POST /api/convert`, backed by `convert-docx-to-pdf.ps1`), so they match the Word file exactly. That only works when the page is served by the local server (`node server.js`) on Windows with Word installed; the PDF option is disabled everywhere else, such as the static Vercel deployment. There is no in-browser PDF fallback on purpose: the browser DOCX renderers tried mis-lay these templates and print wrong certificates. The server listens on `127.0.0.1` only (set `HOST` to change that) and serves only the site's own files.
 
 ## Dependencies
 
@@ -58,4 +58,4 @@ Optionally, running the local server (`node server.js`) exposes `POST /api/conve
 - [docx-preview](https://github.com/VolodymyrBaydalka/docxjs) + [JSZip](https://stuk.github.io/jszip/) (loaded from CDN) — the Live Preview panel
 - [Font Awesome](https://fontawesome.com/) and [Google Fonts](https://fonts.google.com/) (loaded from CDN) — UI typography
 - Node.js standard library only for `server.js` — no npm dependencies
-- Microsoft Word (Windows, COM automation) for the optional PDF conversion step
+- Microsoft Word (Windows, COM automation) for PDF export (optional)

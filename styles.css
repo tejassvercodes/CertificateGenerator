@@ -503,12 +503,12 @@ body {
 
 .cert-preview-note {
     font-size: 0.72rem;
-    color: #8a8a7a;
+    color: #5f5f52;
     font-style: italic;
 }
 
 .cert-preview-empty {
-    color: #8a8a7a;
+    color: #5f5f52;
     font-size: 0.8rem;
     font-style: italic;
 }

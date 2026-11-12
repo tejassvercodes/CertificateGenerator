@@ -214,6 +214,11 @@ const server = http.createServer((req, res) => {
         handleConvert(req, res);
         return;
     }
+    // Lets the page know whether this server can produce Word-exact PDFs (Windows + the script).
+    if (req.method === 'GET' && req.url.split('?')[0] === '/api/convert/status') {
+        sendJson(res, 200, { available: process.platform === 'win32' && fs.existsSync(PS_SCRIPT) });
+        return;
+    }
     if (req.method === 'GET' || req.method === 'HEAD') {
         serveStatic(req, res);
         return;
