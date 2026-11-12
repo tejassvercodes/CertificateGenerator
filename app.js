@@ -42,6 +42,8 @@ const state = {
     librariesMissing: false, // True if PizZip/docxtemplater failed to load from the CDN
     publicationBlocked: false, // True while volume/issue/year/month are missing or unreadable
     downloading: false,      // True while a download runs; edits must not re-enable the buttons
+    format: 'docx',          // Export format: 'docx' or 'pdf'
+    wordAvailable: null,     // null = not probed yet, true/false = local Word converter reachable
     _lastParseError: null,
     _lastWarningsKey: ''
 };
@@ -68,6 +70,8 @@ const el = {
     btnDownloadAll: document.getElementById('btn-download-all'),
     btnDownloadMulti: document.getElementById('btn-download-multi'),
     btnDownloadGroup: document.getElementById('btn-download-group'),
+    formatToggle: document.getElementById('format-toggle'),
+    formatNote: document.getElementById('format-note'),
     logsContainer: document.getElementById('logs-container')
 };
 
@@ -111,6 +115,9 @@ function init() {
     if (!docxPreviewAvailable()) {
         log('Live preview renderer (docx-preview) failed to load from the CDN -- the preview panel will show a plain-text summary instead.', 'system');
     }
+
+    // Is the local Word converter reachable? Decides which PDF route is used (see convertDocxToPdf).
+    probeWordConverter();
 }
 
 // Build the template picker from TEMPLATES -- the array is the only place a journal is defined.
@@ -138,6 +145,11 @@ function setupEventListeners() {
     el.btnDownloadAll.addEventListener('click', handleDownloadAllInOne);
     el.btnDownloadMulti.addEventListener('click', handleDownloadMultiple);
     el.btnDownloadGroup.addEventListener('click', handleDownloadGroup);
+
+    el.formatToggle.addEventListener('click', (e) => {
+        const btn = e.target.closest('.mode-btn');
+        if (btn) setExportFormat(btn.dataset.format);
+    });
 
     el.modeToggle.addEventListener('click', (e) => {
         const btn = e.target.closest('.mode-btn');
@@ -246,7 +258,8 @@ async function selectTemplate(key) {
 // already running. Every state change goes through this one check.
 function refreshDownloadButtons() {
     const canEnable = state.docxLoaded && state.records.length > 0 && !state.publicationBlocked
-        && !state.librariesMissing && !state.downloading;
+        && !state.librariesMissing && !state.downloading
+        && (state.format !== 'pdf' || state.wordAvailable === true);
     el.btnDownloadAll.disabled = !canEnable;
     el.btnDownloadMulti.disabled = !canEnable;
     el.btnDownloadGroup.disabled = !canEnable;
@@ -1503,34 +1516,136 @@ async function runDownload(btnEl, task) {
     }
 }
 
-// 4a. All in One: every certificate combined into a single multi-page Word file
-async function handleDownloadAllInOne() {
-    await runDownload(el.btnDownloadAll, async () => {
-        log(`Generating ${state.records.length} certificate(s) into a single Word document...`, 'system');
-        const blob = buildCombinedDocxBlob(state.records);
-        triggerDownload(blob, `${buildCombinedFilename()}.docx`);
-        log(`Successfully generated and downloaded the combined Word document!`, 'success');
+// ---- Export format (Word / PDF) -------------------------------------------------------------
+
+function setExportFormat(format) {
+    state.format = format === 'pdf' ? 'pdf' : 'docx';
+    el.formatToggle.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.format === state.format);
+    });
+    const isPdf = state.format === 'pdf';
+    el.btnDownloadAll.querySelector('i').className = `fa-solid ${isPdf ? 'fa-file-pdf' : 'fa-file-word'}`;
+    updateFormatNote();
+    refreshDownloadButtons();
+}
+
+function updateFormatNote() {
+    if (state.format !== 'pdf') {
+        el.formatNote.hidden = true;
+        return;
+    }
+    el.formatNote.hidden = false;
+    if (state.wordAvailable === true) {
+        el.formatNote.textContent = 'PDFs are exported by Microsoft Word on this computer, so they match the Word file exactly.';
+    } else if (state.wordAvailable === false) {
+        el.formatNote.textContent = 'PDF export needs Microsoft Word, which is not available here. Run "node server.js" on a Windows PC with Word and open the page from there, or choose Word (.docx).';
+    } else {
+        el.formatNote.textContent = 'Checking for Microsoft Word on this computer...';
+    }
+}
+
+// The Word converter only exists when the page is served by the local server.js on Windows; on a
+// static host (Vercel) the status route 404s and PDFs use the in-browser route instead.
+async function probeWordConverter() {
+    try {
+        const res = await fetch('api/convert/status', { cache: 'no-store' });
+        const body = res.ok ? await res.json() : null;
+        state.wordAvailable = !!(body && body.available);
+    } catch {
+        state.wordAvailable = false;
+    }
+    updateFormatNote();
+    refreshDownloadButtons();
+}
+
+function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+        reader.onerror = () => reject(reader.error || new Error('Could not read the generated file.'));
+        reader.readAsDataURL(blob);
     });
 }
 
-// 4b. Multiple Downloads: one separate Word file per recipient, triggered in sequence. Each
-// download is staggered slightly so Chrome doesn't drop downloads fired in the same tick; the
-// browser may show a one-time "this site wants to download multiple files" prompt after the
-// second file, which is expected. The staggering leaves time for the page to be edited mid-run, so
-// the batch works from a snapshot taken at the start: all its files match what was on screen.
+function base64ToBlob(base64, type) {
+    const bin = atob(base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type });
+}
+
+// Exact route: the local server hands the DOCX files to Microsoft Word and returns Word's own PDFs.
+async function convertWithWord(items) {
+    const files = [];
+    for (const item of items) files.push({ name: item.stem, data: await blobToBase64(item.blob) });
+    const res = await fetch('api/convert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files }),
+    });
+    let body = null;
+    try { body = await res.json(); } catch { /* handled below */ }
+    if (!res.ok || !body || !Array.isArray(body.files) || body.files.length !== items.length) {
+        throw new Error((body && body.error) || `Converter returned HTTP ${res.status}.`);
+    }
+    return items.map((item, i) => ({ stem: item.stem, blob: base64ToBlob(body.files[i].data, 'application/pdf') }));
+}
+
+// DOCX -> PDF through Microsoft Word. There is deliberately no in-browser fallback: the only
+// browser renderer available (docx-preview) mislays these templates -- names and titles go
+// missing and backgrounds land off the page -- so it would print wrong certificates. The PDF
+// option is therefore disabled unless the Word converter is reachable (see refreshDownloadButtons).
+async function convertDocxToPdf(items) {
+    log('Converting to PDF with Microsoft Word...', 'system');
+    try {
+        return await convertWithWord(items);
+    } catch (err) {
+        throw new Error('Word could not create the PDF: ' + err.message);
+    }
+}
+
+// Hand every generated file to the user in the chosen format. `items` are DOCX blobs with the
+// filename stem each should be saved under. Multiple files are staggered so Chrome doesn't drop
+// downloads fired in the same tick.
+async function deliverFiles(items) {
+    const pdf = state.format === 'pdf';
+    const files = pdf ? await convertDocxToPdf(items) : items;
+    for (let i = 0; i < files.length; i++) {
+        triggerDownload(files[i].blob, `${files[i].stem}.${pdf ? 'pdf' : 'docx'}`);
+        if (files.length > 1) log(`Downloaded certificate ${i + 1} of ${files.length}.`, 'success');
+        if (i < files.length - 1) await new Promise(resolve => setTimeout(resolve, 250));
+    }
+}
+
+function formatLabel() {
+    return state.format === 'pdf' ? 'PDF' : 'Word';
+}
+
+// 4a. All in One: every certificate combined into a single multi-page file
+async function handleDownloadAllInOne() {
+    await runDownload(el.btnDownloadAll, async () => {
+        log(`Generating ${state.records.length} certificate(s) into a single ${formatLabel()} document...`, 'system');
+        const blob = buildCombinedDocxBlob(state.records);
+        await deliverFiles([{ stem: buildCombinedFilename(), blob }]);
+        log(`Successfully generated and downloaded the combined ${formatLabel()} document!`, 'success');
+    });
+}
+
+// 4b. Multiple Downloads: one separate file per recipient, triggered in sequence. The browser may
+// show a one-time "this site wants to download multiple files" prompt after the second file, which
+// is expected. The staggering leaves time for the page to be edited mid-run, so the batch works
+// from a snapshot taken at the start: all its files match what was on screen.
 async function handleDownloadMultiple() {
     await runDownload(el.btnDownloadMulti, async () => {
         const records = [...state.records];
         const templateBuffer = state.docxBuffer;
-        const filenames = records.map((_, i) => buildIndividualFilename(i));
         const total = records.length;
         log(`Generating ${total} individual certificate(s)...`, 'system');
-        for (let i = 0; i < total; i++) {
-            const blob = renderDocxBlobForRecord(records[i], templateBuffer);
-            triggerDownload(blob, `${filenames[i]}.docx`);
-            log(`Downloaded certificate ${i + 1} of ${total}.`, 'success');
-            if (i < total - 1) await new Promise(resolve => setTimeout(resolve, 250));
-        }
+        const items = records.map((record, i) => ({
+            stem: buildIndividualFilename(i),
+            blob: renderDocxBlobForRecord(record, templateBuffer),
+        }));
+        await deliverFiles(items);
         log(`All ${total} certificates downloaded individually.`, 'success');
     });
 }
@@ -1542,7 +1657,7 @@ async function handleDownloadGroup() {
         const groupRecord = buildGroupRecord();
         if (!textFits(groupRecord)) log(tooLongMessage('Group certificate'), 'error');
         const blob = buildCombinedDocxBlob([groupRecord]);
-        triggerDownload(blob, `${buildCombinedFilename()}.docx`);
+        await deliverFiles([{ stem: buildCombinedFilename(), blob }]);
         log(`Successfully generated and downloaded the group certificate!`, 'success');
     });
 }
