@@ -1533,22 +1533,31 @@ function setExportFormat(format) {
 }
 
 function updateFormatNote() {
+    const pdfBtn = el.formatToggle.querySelector('[data-format="pdf"]');
+    // No Word converter on this page (e.g. the hosted site): switch the PDF option off so the page
+    // never leaves people on a dead end, and tell them the way to a PDF that does work.
+    if (state.wordAvailable === false) {
+        pdfBtn.disabled = true;
+        pdfBtn.title = 'PDF download is only available when Microsoft Word is installed on the PC running this page';
+        el.formatNote.hidden = false;
+        el.formatNote.textContent = 'Need a PDF? Download the Word (.docx) file, open it in Microsoft Word and choose File > Save As > PDF. It looks exactly like the Word file (the certificate fonts, such as Algerian, only render correctly in Word).';
+        return;
+    }
+    pdfBtn.disabled = false;
+    pdfBtn.title = '';
     if (state.format !== 'pdf') {
         el.formatNote.hidden = true;
         return;
     }
     el.formatNote.hidden = false;
-    if (state.wordAvailable === true) {
-        el.formatNote.textContent = 'PDFs are exported by Microsoft Word on this computer, so they match the Word file exactly.';
-    } else if (state.wordAvailable === false) {
-        el.formatNote.textContent = 'PDF download is not available on this page: the certificate fonts (Algerian, Engravers MT, ...) only render correctly in Microsoft Word. To get a PDF, choose Word (.docx), download, open the file in Word and use File > Save As > PDF. The PDF then looks exactly like the Word file.';
-    } else {
-        el.formatNote.textContent = 'Checking for Microsoft Word on this computer...';
-    }
+    el.formatNote.textContent = state.wordAvailable === true
+        ? 'PDFs are exported by Microsoft Word on this computer, so they match the Word file exactly.'
+        : 'Checking for Microsoft Word on this computer...';
 }
 
-// The Word converter only exists when the page is served by the local server.js on Windows; on a
-// static host (Vercel) the status route 404s and PDFs use the in-browser route instead.
+// The Word converter only exists when the page is served by the local server.js on Windows with
+// Word installed. Anywhere else (e.g. the static Vercel site) the status route is missing, PDF is
+// switched off and the page shows how to get a PDF from the Word file instead.
 async function probeWordConverter() {
     try {
         const res = await fetch('api/convert/status', { cache: 'no-store' });
@@ -1556,6 +1565,10 @@ async function probeWordConverter() {
         state.wordAvailable = !!(body && body.available);
     } catch {
         state.wordAvailable = false;
+    }
+    if (state.wordAvailable === false && state.format === 'pdf') {
+        setExportFormat('docx');
+        return;
     }
     updateFormatNote();
     refreshDownloadButtons();

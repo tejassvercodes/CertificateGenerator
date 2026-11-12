@@ -269,6 +269,11 @@ body {
     color: var(--text);
 }
 
+.mode-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
 .mode-btn.active {
     background-color: var(--accent);
     color: #fff;
