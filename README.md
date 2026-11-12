@@ -50,7 +50,7 @@ Placeholder tags are matched case- and spacing-insensitively (`{Paper Title}`, `
 
    The file number is omitted from any filename if it isn't available in the active mode (e.g. no DOI entered and no manual file number given).
 
-**PDF export.** Section 4 has a Word (.docx) / PDF switch. PDFs are produced by Microsoft Word itself (`POST /api/convert`, backed by `convert-docx-to-pdf.ps1`), so they match the Word file exactly. That only works when the page is served by the local server (`node server.js`) on Windows with Word installed; the PDF option is disabled everywhere else, such as the static Vercel deployment. There is no in-browser PDF fallback on purpose: the browser DOCX renderers tried mis-lay these templates and print wrong certificates. The server listens on `127.0.0.1` only (set `HOST` to change that) and serves only the site's own files.
+**PDF export.** Section 4 has a Word (.docx) / PDF switch. PDFs are produced by Microsoft Word itself (`POST /api/convert`, backed by `convert-docx-to-pdf.ps1`), so they match the Word file exactly. Easiest way to start it: double-click `start.bat` (it runs `node server.js` and opens http://127.0.0.1:8080). That only works when the page is served by the local server on Windows with Word installed; the PDF option is disabled everywhere else, such as the static Vercel deployment. There is no in-browser PDF fallback on purpose: the browser DOCX renderers tried mis-lay these templates and print wrong certificates. The server listens on `127.0.0.1` only (set `HOST` to change that) and serves only the site's own files.
 
 ## Dependencies
 

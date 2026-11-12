@@ -1527,6 +1527,9 @@ function setExportFormat(format) {
     el.btnDownloadAll.querySelector('i').className = `fa-solid ${isPdf ? 'fa-file-pdf' : 'fa-file-word'}`;
     updateFormatNote();
     refreshDownloadButtons();
+    // Look again every time PDF is picked, so starting the local server after the page loaded
+    // (or fixing Word) works without a reload.
+    if (isPdf && state.wordAvailable !== true) probeWordConverter();
 }
 
 function updateFormatNote() {
@@ -1538,7 +1541,7 @@ function updateFormatNote() {
     if (state.wordAvailable === true) {
         el.formatNote.textContent = 'PDFs are exported by Microsoft Word on this computer, so they match the Word file exactly.';
     } else if (state.wordAvailable === false) {
-        el.formatNote.textContent = 'PDF export needs Microsoft Word, which is not available here. Run "node server.js" on a Windows PC with Word and open the page from there, or choose Word (.docx).';
+        el.formatNote.textContent = 'PDF export needs the local Word converter, which this page cannot reach. On a Windows PC with Microsoft Word, double-click start.bat in the project folder (it opens this page at http://127.0.0.1:8080), then pick PDF again. Or choose Word (.docx).';
     } else {
         el.formatNote.textContent = 'Checking for Microsoft Word on this computer...';
     }

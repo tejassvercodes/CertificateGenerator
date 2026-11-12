@@ -79,6 +79,21 @@ function runPowerShell(args) {
     });
 }
 
+// True only when Microsoft Word is really registered on this Windows machine, so the page never
+// offers PDF export that is bound to fail. Only a positive answer is cached: if Word gets
+// installed while the server is running, the next check picks it up.
+let wordInstalledCache = false;
+function isWordInstalled() {
+    if (process.platform !== 'win32') return Promise.resolve(false);
+    if (wordInstalledCache) return Promise.resolve(true);
+    return new Promise((resolve) => {
+        execFile('reg', ['query', 'HKCR\\Word.Application\\CLSID'], { windowsHide: true, timeout: 10000 }, (err) => {
+            wordInstalledCache = !err;
+            resolve(wordInstalledCache);
+        });
+    });
+}
+
 // Sanitize a client-supplied filename down to a safe basename with no path components.
 function safeBaseName(name, fallback) {
     const base = path.basename(String(name || '')).replace(/\.docx$/i, '');
@@ -216,7 +231,9 @@ const server = http.createServer((req, res) => {
     }
     // Lets the page know whether this server can produce Word-exact PDFs (Windows + the script).
     if (req.method === 'GET' && req.url.split('?')[0] === '/api/convert/status') {
-        sendJson(res, 200, { available: process.platform === 'win32' && fs.existsSync(PS_SCRIPT) });
+        isWordInstalled().then((word) => {
+            sendJson(res, 200, { available: word && fs.existsSync(PS_SCRIPT) });
+        });
         return;
     }
     if (req.method === 'GET' || req.method === 'HEAD') {
@@ -232,5 +249,9 @@ if (!fs.existsSync(PS_SCRIPT)) {
 
 server.listen(PORT, HOST, () => {
     console.log(`Certificate Generator running at http://${HOST}:${PORT}`);
-    console.log('DOCX to PDF conversion uses Microsoft Word (COM automation).');
+    isWordInstalled().then((word) => {
+        console.log(word
+            ? 'PDF export is ready: DOCX files are converted by Microsoft Word (COM automation).'
+            : 'Microsoft Word was not found on this computer - PDF export will be unavailable (Word .docx still works).');
+    });
 });
