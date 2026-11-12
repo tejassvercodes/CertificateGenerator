@@ -237,3 +237,8 @@ file matches the card that is highlighted (#16).
 - Layout rules matched to Word: 1.5x line spacing is added *below* a line, the first baseline sits one font ascent under the line top; font ascent includes GDI external leading (win ascent/descent + hhea line gap rule), read from the installed font files; no kerning/ligatures; breaks allowed after hyphens; a line is dropped if it does not fit inside the box.
 - Verified: 12 sample certificates (4 templates x short/long/no-DOI) compared against Word PDFs -- baselines within 0.4 pt, line starts within 0.3 pt, same wraps; visual side-by-side on all templates. The full UI path (template, paste data, PDF, All in One / Multiple / Group) run in headless Chrome on a static server and on the local Word server.
 - Known limits: text is an image; ~0.3 MB per certificate; visitors lacking the Office fonts see a warning and a different typeface; the font metrics come from the PC that ran the build tool.
+
+# Word + PDF downloaded together
+
+- The Word/PDF switch is gone. `deliverFiles` always downloads the .docx and, right after it, the .pdf with the same stem (interleaved per certificate for Multiple Downloads). If the PDF step fails (e.g. pdf-lib did not load), the Word files are still downloaded and an error line is logged.
+- Verified in headless Chrome on a static server (browser route) and on the local server (Word route): All in One = 1 docx + 1 pdf, Group = 1 + 1, Multiple (2 records) = 2 docx + 2 pdf; with the PDF library removed, the Word file still downloads.

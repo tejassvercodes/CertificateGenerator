@@ -50,7 +50,7 @@ Placeholder tags are matched case- and spacing-insensitively (`{Paper Title}`, `
 
    The file number is omitted from any filename if it isn't available in the active mode (e.g. no DOI entered and no manual file number given).
 
-**PDF export.** Section 4 has a Word (.docx) / PDF switch, and PDF works on the hosted site too, with nothing to install or configure.
+**PDF export.** Every button in section 4 (All in One, Multiple Downloads, Group Download) downloads both a Word (.docx) file and a PDF under the same name -- there is no format switch. PDF works on the hosted site too, with nothing to install or configure. If the PDF cannot be made, the Word file is still downloaded and the log says why.
 
 - **In the browser (default).** Word renders each certificate once into `templates/pdf/<KEY>.pdf` with the text box that holds the changing fields left empty. `pdf-export.js` (using pdf-lib) lays that box out itself -- word wrap, line spacing, colours, shadow, taken from `templates/pdf/<KEY>.json` -- draws the text at 300 dpi with the fonts installed on the visitor's computer, and stamps it onto the page. Checked against Word's own PDFs on all four templates: every line within 0.4 pt of Word, same line breaks. The text is an image (not selectable) and each certificate adds about 0.3 MB.
 - **Fonts.** The templates use Microsoft Office fonts (Algerian, Calisto MT, Nirmala UI, Calibri, ...). Any computer without one prints that text in a different typeface; the page checks for this and shows a warning with the way out (download the .docx and use Word's File > Save As > PDF).
