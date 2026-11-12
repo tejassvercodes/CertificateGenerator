@@ -101,6 +101,9 @@ function init() {
     renderTemplateGrid();
     setupEventListeners();
 
+    // Start with the CCE template selected so the page is usable straight away.
+    selectTemplate('CCE');
+
     // The DOCX libraries load from a CDN (index.html); if that request is blocked or fails,
     // every download would previously fail only once the user clicked a button, with an opaque
     // "PizZip is not a constructor" error. Detect it up front instead.
