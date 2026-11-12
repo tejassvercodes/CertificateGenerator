@@ -40,7 +40,7 @@
                     <span class="file-name" id="template-status">No template selected</span>
                 </div>
 
-                <div class="card">
+                <div class="card data-card">
                     <div class="card-header">
                         <i class="fa-solid fa-keyboard"></i>
                         <h2>2. Paste Title, Author Names &amp; Affiliations</h2>
@@ -73,76 +73,69 @@
                     <span id="preview-pub-info" class="preview-pub-info"></span>
                 </div>
 
-                <div class="card">
-                    <div class="card-header">
-                        <i class="fa-solid fa-link"></i>
-                        <h2>3. Choose</h2>
-                    </div>
-                    <div class="mode-toggle" id="mode-toggle">
-                        <button type="button" class="mode-btn active" data-mode="with">With DOI</button>
-                        <button type="button" class="mode-btn" data-mode="without">Without DOI</button>
-                    </div>
-
-                    <div id="doi-fields">
-                        <input type="text" id="doi-input" class="doi-field" placeholder="e.g. 10.1234/example.2026.15817">
-                        <p class="hint">All other publication details are extracted automatically from the DOI.</p>
-                    </div>
-
-                    <div id="manual-fields" class="manual-grid" hidden>
-                        <div class="manual-row">
-                            <label>Volume<input type="text" id="vol-input" class="doi-field" placeholder="15"></label>
-                            <label>Issue<input type="text" id="issue-input" class="doi-field" placeholder="8"></label>
-                            <label>Year<input type="text" id="year-input" class="doi-field" placeholder="2026"></label>
-                            <label>File number<input type="text" id="filenum-input" class="doi-field" placeholder="17"></label>
+                <!-- Choose (3) and Download (4) share a row -->
+                <div class="control-bottom">
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="fa-solid fa-link"></i>
+                            <h2>3. Choose</h2>
                         </div>
-                        <p class="hint">The issue number sets the month (8 → August). The file number is used as the filename prefix.</p>
-                    </div>
-                </div>
+                        <div class="mode-toggle" id="mode-toggle">
+                            <button type="button" class="mode-btn active" data-mode="with">With DOI</button>
+                            <button type="button" class="mode-btn" data-mode="without">Without DOI</button>
+                        </div>
 
-                <div class="card">
-                    <div class="card-header">
-                        <i class="fa-solid fa-download"></i>
-                        <h2>4. Download</h2>
+                        <div id="doi-fields">
+                            <input type="text" id="doi-input" class="doi-field" placeholder="e.g. 10.1234/example.2026.15817">
+                            <p class="hint">All other publication details are extracted automatically from the DOI.</p>
+                        </div>
+
+                        <div id="manual-fields" class="manual-grid" hidden>
+                            <div class="manual-row">
+                                <label>Volume<input type="text" id="vol-input" class="doi-field" placeholder="15"></label>
+                                <label>Issue<input type="text" id="issue-input" class="doi-field" placeholder="8"></label>
+                                <label>Year<input type="text" id="year-input" class="doi-field" placeholder="2026"></label>
+                                <label>File number<input type="text" id="filenum-input" class="doi-field" placeholder="17"></label>
+                            </div>
+                            <p class="hint">The issue number sets the month (8 → August). The file number is used as the filename prefix.</p>
+                        </div>
                     </div>
-                    <p class="hint" id="format-note">Every download gives you both a Word (.docx) file and a PDF.</p>
-                    <div class="download-options">
-                        <button type="button" class="download-option-btn" id="btn-download-all" disabled>
-                            <i class="fa-solid fa-file-word"></i>
-                            <span class="download-option-text">
-                                <span class="download-option-title">All in One</span>
-                                <span class="download-option-subtitle">Every certificate combined into a single multi-page file</span>
-                            </span>
-                        </button>
-                        <button type="button" class="download-option-btn" id="btn-download-multi" disabled>
-                            <i class="fa-solid fa-copy"></i>
-                            <span class="download-option-text">
-                                <span class="download-option-title">Multiple Downloads</span>
-                                <span class="download-option-subtitle">Each certificate downloaded as its own separate file</span>
-                            </span>
-                        </button>
-                        <button type="button" class="download-option-btn" id="btn-download-group" disabled>
-                            <i class="fa-solid fa-users"></i>
-                            <span class="download-option-text">
-                                <span class="download-option-title">Group Download</span>
-                                <span class="download-option-subtitle">One certificate listing every author together</span>
-                            </span>
-                        </button>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="fa-solid fa-download"></i>
+                            <h2>4. Download</h2>
+                        </div>
+                        <p class="hint" id="format-note">Every download gives you both a Word (.docx) file and a PDF.</p>
+                        <div class="download-options">
+                            <button type="button" class="download-option-btn" id="btn-download-all" disabled>
+                                <i class="fa-solid fa-file-word"></i>
+                                <span class="download-option-text">
+                                    <span class="download-option-title">All in One</span>
+                                    <span class="download-option-subtitle">Every certificate combined into a single multi-page file</span>
+                                </span>
+                            </button>
+                            <button type="button" class="download-option-btn" id="btn-download-multi" disabled>
+                                <i class="fa-solid fa-copy"></i>
+                                <span class="download-option-text">
+                                    <span class="download-option-title">Multiple Downloads</span>
+                                    <span class="download-option-subtitle">Each certificate downloaded as its own separate file</span>
+                                </span>
+                            </button>
+                            <button type="button" class="download-option-btn" id="btn-download-group" disabled>
+                                <i class="fa-solid fa-users"></i>
+                                <span class="download-option-text">
+                                    <span class="download-option-title">Group Download</span>
+                                    <span class="download-option-subtitle">One certificate listing every author together</span>
+                                </span>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </section>
 
-            <!-- Right Side: Live Logs + Live Preview -->
+            <!-- Right Side: Live Preview -->
             <section class="preview-panel">
-                <div class="card log-card">
-                    <div class="card-header">
-                        <i class="fa-solid fa-terminal"></i>
-                        <h2>System Logs</h2>
-                    </div>
-                    <div class="logs" id="logs-container">
-                        <div class="log-entry system"><i class="fa-solid fa-info-circle"></i> Application initialized. Ready for template.</div>
-                    </div>
-                </div>
-
                 <div class="card live-preview-card">
                     <div class="card-header">
                         <i class="fa-solid fa-eye"></i>
@@ -155,6 +148,17 @@
                 </div>
             </section>
         </main>
+
+        <!-- System Logs: last, below the work area -->
+        <div class="card log-card">
+            <div class="card-header">
+                <i class="fa-solid fa-terminal"></i>
+                <h2>System Logs</h2>
+            </div>
+            <div class="logs" id="logs-container">
+                <div class="log-entry system"><i class="fa-solid fa-info-circle"></i> Application initialized. Ready for template.</div>
+            </div>
+        </div>
     </div>
 
     <!-- pdf-lib assembles the PDF export (see pdf-export.js). -->

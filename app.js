@@ -134,6 +134,17 @@ function renderTemplateGrid() {
 }
 
 function setupEventListeners() {
+    // The preview is fitted to its panel when drawn; refit it when the window changes size.
+    let refitTimer = null;
+    window.addEventListener('resize', () => {
+        clearTimeout(refitTimer);
+        refitTimer = setTimeout(() => {
+            const frame = el.livePreview.querySelector('.docx-scale-frame');
+            const mount = frame && frame.querySelector('.docx-render');
+            if (frame && mount) fitDocxPreview(el.livePreview, frame, mount);
+        }, 150);
+    });
+
     el.templateGrid.addEventListener('click', (e) => {
         const card = e.target.closest('.template-card');
         if (card) selectTemplate(card.dataset.template);
@@ -1214,7 +1225,13 @@ function fitDocxPreview(box, frame, mount) {
 
     const cs = getComputedStyle(box);
     const avail = box.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-    const scale = Math.min(1, avail / contentW);
+    let scale = Math.min(1, avail / contentW);
+    // In the one-screen layout the panel has a fixed height (no max-height): a tall page must fit
+    // that too, so the whole certificate is visible without scrolling. Elsewhere the box scrolls.
+    if (cs.maxHeight === 'none') {
+        const availH = box.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - 28; // room for the "Showing certificate 1 of N" note
+        if (availH > 40) scale = Math.min(scale, availH / contentH);
+    }
 
     mount.style.transformOrigin = 'top left';
     mount.style.transform = `translate(${-originX * scale}px, ${-originY * scale}px) scale(${scale})`;
