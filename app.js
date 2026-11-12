@@ -42,8 +42,9 @@ const state = {
     librariesMissing: false, // True if PizZip/docxtemplater failed to load from the CDN
     publicationBlocked: false, // True while volume/issue/year/month are missing or unreadable
     downloading: false,      // True while a download runs; edits must not re-enable the buttons
-    format: 'docx',          // Export format: 'docx' or 'pdf'
     wordAvailable: null,     // null = not probed yet, true/false = local Word converter reachable
+    missingFonts: null,      // Certificate fonts this computer lacks (browser PDF route), for the template in fontsFor
+    fontsFor: '',            // Template key missingFonts was computed for
     _lastParseError: null,
     _lastWarningsKey: ''
 };
@@ -70,7 +71,6 @@ const el = {
     btnDownloadAll: document.getElementById('btn-download-all'),
     btnDownloadMulti: document.getElementById('btn-download-multi'),
     btnDownloadGroup: document.getElementById('btn-download-group'),
-    formatToggle: document.getElementById('format-toggle'),
     formatNote: document.getElementById('format-note'),
     logsContainer: document.getElementById('logs-container')
 };
@@ -146,11 +146,6 @@ function setupEventListeners() {
     el.btnDownloadMulti.addEventListener('click', handleDownloadMultiple);
     el.btnDownloadGroup.addEventListener('click', handleDownloadGroup);
 
-    el.formatToggle.addEventListener('click', (e) => {
-        const btn = e.target.closest('.mode-btn');
-        if (btn) setExportFormat(btn.dataset.format);
-    });
-
     el.modeToggle.addEventListener('click', (e) => {
         const btn = e.target.closest('.mode-btn');
         if (btn) setDoiMode(btn.dataset.mode);
@@ -211,6 +206,7 @@ async function selectTemplate(key) {
         state.docxBuffer = state.buffers[key];
         state.docxLoaded = true;
         state.templateKey = key;
+        updateFormatNote();
         el.templateStatus.textContent = `${key} template selected`;
         log(`Switched to the ${key} template.`, 'success');
         handleDataInput();
@@ -237,6 +233,7 @@ async function selectTemplate(key) {
         state.docxBuffer = buffer;
         state.docxLoaded = true;
         state.templateKey = key;
+        updateFormatNote();
 
         el.templateStatus.textContent = `${key} template selected`;
         log(`${key} template loaded successfully.`, 'success');
@@ -258,8 +255,7 @@ async function selectTemplate(key) {
 // already running. Every state change goes through this one check.
 function refreshDownloadButtons() {
     const canEnable = state.docxLoaded && state.records.length > 0 && !state.publicationBlocked
-        && !state.librariesMissing && !state.downloading
-        && (state.format !== 'pdf' || state.wordAvailable === true);
+        && !state.librariesMissing && !state.downloading;
     el.btnDownloadAll.disabled = !canEnable;
     el.btnDownloadMulti.disabled = !canEnable;
     el.btnDownloadGroup.disabled = !canEnable;
@@ -1518,46 +1514,48 @@ async function runDownload(btnEl, task) {
 
 // ---- Export format (Word / PDF) -------------------------------------------------------------
 
-function setExportFormat(format) {
-    state.format = format === 'pdf' ? 'pdf' : 'docx';
-    el.formatToggle.querySelectorAll('.mode-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.format === state.format);
-    });
-    const isPdf = state.format === 'pdf';
-    el.btnDownloadAll.querySelector('i').className = `fa-solid ${isPdf ? 'fa-file-pdf' : 'fa-file-word'}`;
-    updateFormatNote();
-    refreshDownloadButtons();
-    // Look again every time PDF is picked, so starting the local server after the page loaded
-    // (or fixing Word) works without a reload.
-    if (isPdf && state.wordAvailable !== true) probeWordConverter();
+// Which way a PDF gets made on this page:
+//   'word'    -- the local server.js hands the Word file to Microsoft Word (exact, but only on a PC running it)
+//   'browser' -- pdf-export.js builds it here from a Word-rendered page plus the laid-out text
+//   'none'    -- neither is available (the PDF library failed to load)
+function pdfRoute() {
+    if (state.wordAvailable === true) return 'word';
+    return window.PdfExport && window.PdfExport.available() ? 'browser' : 'none';
 }
 
 function updateFormatNote() {
-    const pdfBtn = el.formatToggle.querySelector('[data-format="pdf"]');
-    // No Word converter on this page (e.g. the hosted site): switch the PDF option off so the page
-    // never leaves people on a dead end, and tell them the way to a PDF that does work.
-    if (state.wordAvailable === false) {
-        pdfBtn.disabled = true;
-        pdfBtn.title = 'PDF download is only available when Microsoft Word is installed on the PC running this page';
-        el.formatNote.hidden = false;
-        el.formatNote.textContent = 'Need a PDF? Download the Word (.docx) file, open it in Microsoft Word and choose File > Save As > PDF. It looks exactly like the Word file (the certificate fonts, such as Algerian, only render correctly in Word).';
-        return;
+    const base = 'Every download gives you both a Word (.docx) file and a PDF.';
+    const route = pdfRoute();
+    let note = base;
+    if (route === 'none') {
+        note += ' The PDF could not be prepared on this page (its library failed to load; reload to try again), so you would get the Word file only.';
+    } else if (route === 'word') {
+        note += ' The PDFs are made by Microsoft Word on this computer, so they match the Word file exactly.';
+    } else {
+        // Browser route. The certificate text is drawn with the fonts installed on this computer, so a
+        // missing one (Algerian, ...) would print in a different typeface -- say so before it happens.
+        if (state.templateKey && state.fontsFor !== state.templateKey) checkFonts();
+        const missing = state.fontsFor === state.templateKey ? state.missingFonts : null;
+        if (missing && missing.length) {
+            note += ` This computer does not have the font${missing.length > 1 ? 's' : ''} ${missing.join(', ')}, so that text would print in a different typeface in the PDF than in the Word file. Install the Microsoft Office fonts, or open the Word file in Word and use File > Save As > PDF.`;
+        }
     }
-    pdfBtn.disabled = false;
-    pdfBtn.title = '';
-    if (state.format !== 'pdf') {
-        el.formatNote.hidden = true;
-        return;
-    }
-    el.formatNote.hidden = false;
-    el.formatNote.textContent = state.wordAvailable === true
-        ? 'PDFs are exported by Microsoft Word on this computer, so they match the Word file exactly.'
-        : 'Checking for Microsoft Word on this computer...';
+    el.formatNote.textContent = note;
+}
+
+async function checkFonts() {
+    const key = state.templateKey;
+    state.fontsFor = key;
+    state.missingFonts = null;
+    try {
+        state.missingFonts = await window.PdfExport.missingFontsFor(key);
+    } catch { /* the note simply omits the font warning */ }
+    if (state.templateKey === key) updateFormatNote();
 }
 
 // The Word converter only exists when the page is served by the local server.js on Windows with
-// Word installed. Anywhere else (e.g. the static Vercel site) the status route is missing, PDF is
-// switched off and the page shows how to get a PDF from the Word file instead.
+// Word installed. Anywhere else (e.g. the static Vercel site) the status route is missing and PDFs
+// are built in the browser instead.
 async function probeWordConverter() {
     try {
         const res = await fetch('api/convert/status', { cache: 'no-store' });
@@ -1565,10 +1563,6 @@ async function probeWordConverter() {
         state.wordAvailable = !!(body && body.available);
     } catch {
         state.wordAvailable = false;
-    }
-    if (state.wordAvailable === false && state.format === 'pdf') {
-        setExportFormat('docx');
-        return;
     }
     updateFormatNote();
     refreshDownloadButtons();
@@ -1607,43 +1601,75 @@ async function convertWithWord(items) {
     return items.map((item, i) => ({ stem: item.stem, blob: base64ToBlob(body.files[i].data, 'application/pdf') }));
 }
 
-// DOCX -> PDF through Microsoft Word. There is deliberately no in-browser fallback: the only
-// browser renderer available (docx-preview) mislays these templates -- names and titles go
-// missing and backgrounds land off the page -- so it would print wrong certificates. The PDF
-// option is therefore disabled unless the Word converter is reachable (see refreshDownloadButtons).
+// Browser route: the Word-rendered certificate page with the text laid out by pdf-export.js. Each
+// item carries the records (and template) its Word file was built from.
+async function convertInBrowser(items) {
+    const files = [];
+    for (let i = 0; i < items.length; i++) {
+        files.push({ stem: items[i].stem, blob: await window.PdfExport.build(items[i].templateKey, items[i].records) });
+        if (items.length > 1) log(`Built PDF ${i + 1} of ${items.length}...`, 'system');
+    }
+    return files;
+}
+
+// Turn the generated Word files into PDFs: through Microsoft Word when this page is served by the
+// local server on a PC that has it (exact), otherwise in the browser. There is deliberately no
+// docx-preview route: that renderer mislays these templates and would print wrong certificates.
 async function convertDocxToPdf(items) {
-    log('Converting to PDF with Microsoft Word...', 'system');
+    if (pdfRoute() === 'none') throw new Error('The PDF library did not load, so no PDF could be made.');
+    if (pdfRoute() === 'word') {
+        log('Converting to PDF with Microsoft Word...', 'system');
+        try {
+            return await convertWithWord(items);
+        } catch (err) {
+            throw new Error('Word could not create the PDF: ' + err.message);
+        }
+    }
+    log('Building PDF in the browser...', 'system');
     try {
-        return await convertWithWord(items);
+        return await convertInBrowser(items);
     } catch (err) {
-        throw new Error('Word could not create the PDF: ' + err.message);
+        throw new Error('Could not build the PDF: ' + err.message);
     }
 }
 
-// Hand every generated file to the user in the chosen format. `items` are DOCX blobs with the
-// filename stem each should be saved under. Multiple files are staggered so Chrome doesn't drop
-// downloads fired in the same tick.
+// Hand every generated certificate file to the user as BOTH a Word file and a PDF, saved under the
+// same name. `items` are DOCX blobs with the filename stem each should be saved under (plus the
+// records they were built from, which the PDF is made from). If the PDF cannot be made, the Word
+// files are still downloaded. The downloads are staggered so Chrome doesn't drop files fired in the
+// same tick. Returns what was delivered: 'Word and PDF' or 'Word'.
 async function deliverFiles(items) {
-    const pdf = state.format === 'pdf';
-    const files = pdf ? await convertDocxToPdf(items) : items;
-    for (let i = 0; i < files.length; i++) {
-        triggerDownload(files[i].blob, `${files[i].stem}.${pdf ? 'pdf' : 'docx'}`);
-        if (files.length > 1) log(`Downloaded certificate ${i + 1} of ${files.length}.`, 'success');
-        if (i < files.length - 1) await new Promise(resolve => setTimeout(resolve, 250));
+    let pdfs = null;
+    try {
+        pdfs = await convertDocxToPdf(items);
+    } catch (err) {
+        log(`${err.message} Downloading the Word file${items.length > 1 ? 's' : ''} only.`, 'error');
     }
+    const pause = () => new Promise(resolve => setTimeout(resolve, 250));
+    for (let i = 0; i < items.length; i++) {
+        triggerDownload(items[i].blob, `${items[i].stem}.docx`);
+        if (pdfs) {
+            await pause();
+            triggerDownload(pdfs[i].blob, `${pdfs[i].stem}.pdf`);
+        }
+        if (items.length > 1) log(`Downloaded certificate ${i + 1} of ${items.length}.`, 'success');
+        if (i < items.length - 1) await pause();
+    }
+    return pdfs ? 'Word and PDF' : 'Word';
 }
 
-function formatLabel() {
-    return state.format === 'pdf' ? 'PDF' : 'Word';
+// "Word" -> "Word document", "Word and PDF" -> "Word and PDF documents"
+function documentsLabel(delivered) {
+    return delivered === 'Word' ? 'Word document' : `${delivered} documents`;
 }
 
 // 4a. All in One: every certificate combined into a single multi-page file
 async function handleDownloadAllInOne() {
     await runDownload(el.btnDownloadAll, async () => {
-        log(`Generating ${state.records.length} certificate(s) into a single ${formatLabel()} document...`, 'system');
+        log(`Generating ${state.records.length} certificate(s) into a single combined Word file and PDF...`, 'system');
         const blob = buildCombinedDocxBlob(state.records);
-        await deliverFiles([{ stem: buildCombinedFilename(), blob }]);
-        log(`Successfully generated and downloaded the combined ${formatLabel()} document!`, 'success');
+        const delivered = await deliverFiles([{ stem: buildCombinedFilename(), blob, records: [...state.records], templateKey: state.templateKey }]);
+        log(`Successfully generated and downloaded the combined ${documentsLabel(delivered)}!`, 'success');
     });
 }
 
@@ -1655,11 +1681,14 @@ async function handleDownloadMultiple() {
     await runDownload(el.btnDownloadMulti, async () => {
         const records = [...state.records];
         const templateBuffer = state.docxBuffer;
+        const templateKey = state.templateKey;
         const total = records.length;
         log(`Generating ${total} individual certificate(s)...`, 'system');
         const items = records.map((record, i) => ({
             stem: buildIndividualFilename(i),
             blob: renderDocxBlobForRecord(record, templateBuffer),
+            records: [record],
+            templateKey,
         }));
         await deliverFiles(items);
         log(`All ${total} certificates downloaded individually.`, 'success');
@@ -1673,7 +1702,7 @@ async function handleDownloadGroup() {
         const groupRecord = buildGroupRecord();
         if (!textFits(groupRecord)) log(tooLongMessage('Group certificate'), 'error');
         const blob = buildCombinedDocxBlob([groupRecord]);
-        await deliverFiles([{ stem: buildCombinedFilename(), blob }]);
+        await deliverFiles([{ stem: buildCombinedFilename(), blob, records: [groupRecord], templateKey: state.templateKey }]);
         log(`Successfully generated and downloaded the group certificate!`, 'success');
     });
 }
