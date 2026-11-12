@@ -56,23 +56,6 @@
                     </div>
                 </div>
 
-                <div class="card" id="preview-card" hidden>
-                    <div class="card-header">
-                        <i class="fa-solid fa-table-list"></i>
-                        <h2>Parsed Preview</h2>
-                    </div>
-                    <div id="parse-warnings" class="parse-warnings"></div>
-                    <div class="preview-table-wrap">
-                        <table id="preview-table">
-                            <thead>
-                                <tr><th>#</th><th>Name</th><th>Designation</th><th>Paper Title</th></tr>
-                            </thead>
-                            <tbody id="preview-table-body"></tbody>
-                        </table>
-                    </div>
-                    <span id="preview-pub-info" class="preview-pub-info"></span>
-                </div>
-
                 <!-- Choose (3) and Download (4) share a row -->
                 <div class="control-bottom">
                     <div class="card">
@@ -134,7 +117,7 @@
                 </div>
             </section>
 
-            <!-- Right Side: Live Preview -->
+            <!-- Right Side: Live Preview, then the parsed data table -->
             <section class="preview-panel">
                 <div class="card live-preview-card">
                     <div class="card-header">
@@ -145,6 +128,23 @@
                     <div class="cert-preview" id="live-preview">
                         <p class="cert-preview-empty">Select a template and paste data to preview the certificate.</p>
                     </div>
+                </div>
+
+                <div class="card" id="preview-card" hidden>
+                    <div class="card-header">
+                        <i class="fa-solid fa-table-list"></i>
+                        <h2>Parsed Preview</h2>
+                    </div>
+                    <div id="parse-warnings" class="parse-warnings"></div>
+                    <div class="preview-table-wrap">
+                        <table id="preview-table">
+                            <thead>
+                                <tr><th>#</th><th>Name</th><th>Designation</th><th>Paper Title</th></tr>
+                            </thead>
+                            <tbody id="preview-table-body"></tbody>
+                        </table>
+                    </div>
+                    <span id="preview-pub-info" class="preview-pub-info"></span>
                 </div>
             </section>
         </main>
